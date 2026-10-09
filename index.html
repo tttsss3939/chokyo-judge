@@ -327,6 +327,7 @@ table.stats th { font-size: 11px; color: var(--muted); font-weight: 700; }
     <h2>出走レース<span class="spacer"></span><button class="link-btn" id="addRaceToggle">＋ 追加</button></h2>
     <div class="list" id="raceList"></div>
     <form id="raceForm" class="form-grid" hidden>
+      <label class="f full" id="gradedPickWrap">JRA重賞から選ぶ<select class="in" id="gradedPick"><option value="">読み込み中…</option></select></label>
       <label class="f full" id="racePickWrap">登録済みのレースから選ぶ<select class="in" id="racePick"></select></label>
       <label class="f">日付<input class="in" type="date" name="date" required></label>
       <label class="f">着順（未出走は空欄）<input class="in" type="text" name="result" placeholder="例 4着"></label>

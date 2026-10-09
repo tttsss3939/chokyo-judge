@@ -661,7 +661,7 @@
   $('#addRaceToggle').addEventListener('click', () => {
     if (!ensureHorse()) return;
     raceForm.reset(); raceForm.index.value = ''; raceForm.hidden = !raceForm.hidden;
-    if (!raceForm.hidden) { fillRacePicker(true); ($('#racePickWrap').hidden ? raceForm.date : $('#racePick')).focus(); }
+    if (!raceForm.hidden) { fillRacePicker(true); fillGradedPicker(); }
   });
 
   /** 他の馬で登録済みのレース（この馬にまだ無いもの）を選択肢に。レース名の入力候補も全馬から */
@@ -686,10 +686,48 @@
     $('#racePickWrap').hidden = !show || !list.length;
     $('#raceNames').innerHTML = [...names].sort((a, b) => a.localeCompare(b, 'ja')).map((n) => `<option value="${esc(n)}">`).join('');
   }
+  // JRA 重賞日程（data/graded_<年>.json、tools/update_graded.py で年1回更新）
+  let gradedCache = null;
+  async function loadGraded() {
+    if (gradedCache) return gradedCache;
+    const y = +todayISO().slice(0, 4);
+    const lists = await Promise.all([y - 1, y, y + 1].map((yy) =>
+      fetch(`data/graded_${yy}.json`).then((r) => (r.ok ? r.json() : [])).catch(() => [])));
+    gradedCache = lists.flat();
+    return gradedCache;
+  }
+  const WD = ['日', '月', '火', '水', '木', '金', '土'];
+  async function fillGradedPicker() {
+    const sel = $('#gradedPick');
+    const list = await loadGraded();
+    if (!list.length) { $('#gradedPickWrap').hidden = true; return; }
+    const today = todayISO();
+    const mine = new Set((horse() ? horse().races : []).map(raceKey));
+    const label = (r) => {
+      const wd = WD[new Date(r.date + 'T00:00:00Z').getUTCDay()];
+      return `${mine.has(raceKey(r)) ? '✓ ' : ''}${r.date.slice(5).replace('-', '/')}(${wd}) ${r.name} ${r.place} ${r.course}`;
+    };
+    const up = list.filter((r) => r.date >= today).sort((a, b) => (a.date < b.date ? -1 : 1));
+    const past = list.filter((r) => r.date < today).sort((a, b) => (a.date < b.date ? 1 : -1));
+    const idx = new Map(list.map((r, i) => [r, i]));
+    sel.innerHTML = '<option value="">選択してください</option>'
+      + `<optgroup label="これから">${up.map((r) => `<option value="${idx.get(r)}">${esc(label(r))}</option>`).join('')}</optgroup>`
+      + `<optgroup label="終了（新しい順）">${past.map((r) => `<option value="${idx.get(r)}">${r.date.slice(0, 4)}/${esc(label(r))}</option>`).join('')}</optgroup>`;
+    $('#gradedPickWrap').hidden = false;
+  }
+  $('#gradedPick').addEventListener('change', (ev) => {
+    const r = gradedCache && gradedCache[+ev.target.value];
+    if (!r || ev.target.value === '') return;
+    raceForm.date.value = r.date; raceForm.name.value = r.name;
+    $('#racePick').value = '';
+    raceForm.result.focus();
+  });
+
   $('#racePick').addEventListener('change', (ev) => {
     const r = ev.target._list && ev.target._list[+ev.target.value];
     if (!r) return;
     raceForm.date.value = r.date; raceForm.name.value = r.name;
+    $('#gradedPick').value = '';
     raceForm.result.focus();
   });
   $('#raceCancel').addEventListener('click', () => { raceForm.hidden = true; });
@@ -708,7 +746,7 @@
     const e = ev.target.closest('[data-edit-race]'), d = ev.target.closest('[data-del-race]');
     if (e) {
       const r = h.races[+e.dataset.editRace];
-      fillRacePicker(false);
+      fillRacePicker(false); $('#gradedPickWrap').hidden = true;
       raceForm.hidden = false; raceForm.index.value = e.dataset.editRace;
       raceForm.date.value = r.date; raceForm.name.value = r.name; raceForm.result.value = r.result || '';
       raceForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
