@@ -1,0 +1,4 @@
+# JRA-VAN 画面のスクショ（OCR テスト用。公開しない）
+tests/screenshots/
+__pycache__/
+.DS_Store

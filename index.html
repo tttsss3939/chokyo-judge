@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>調教ジャッジ</title>
+<meta name="description" content="JRA-VAN の調教タイム画面のスクショから追い切りを判定する">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="調教ジャッジ">
+<meta name="theme-color" content="#1f7a34" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1a12" media="(prefers-color-scheme: dark)">
+<style>
+:root {
+  --bg: #f3f5f2;
+  --surface: #ffffff;
+  --surface-2: #f6f8f5;
+  --text: #17201a;
+  --muted: #5d6b61;
+  --line: #dde3dc;
+  --brand: #1f7a34;
+  --brand-ink: #ffffff;
+  --warn: #b45309;
+  --warn-bg: #fff4e0;
+  --bad: #c0392b;
+  --good: #15803d;
+  --rank-s: #c2410c;
+  --rank-a: #15803d;
+  --rank-b: #1d4ed8;
+  --rank-c: #6b7280;
+  --hanro: #e2681b;
+  --wood: #0f8f83;
+  --race: #8a948c;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1310;
+    --surface: #171e19;
+    --surface-2: #1d2620;
+    --text: #e6ece7;
+    --muted: #9aa89e;
+    --line: #2b362e;
+    --brand: #3fae5a;
+    --brand-ink: #08130b;
+    --warn: #f0a24a;
+    --warn-bg: #33250f;
+    --bad: #f07466;
+    --good: #5bd27f;
+    --rank-s: #fb923c;
+    --rank-a: #4ade80;
+    --rank-b: #7aa2ff;
+    --rank-c: #9ca3af;
+    --hanro: #ff9150;
+    --wood: #3cc9b9;
+    --race: #6b766e;
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1310; --surface: #171e19; --surface-2: #1d2620; --text: #e6ece7; --muted: #9aa89e;
+  --line: #2b362e; --brand: #3fae5a; --brand-ink: #08130b; --warn: #f0a24a; --warn-bg: #33250f;
+  --bad: #f07466; --good: #5bd27f; --rank-s: #fb923c; --rank-a: #4ade80; --rank-b: #7aa2ff; --rank-c: #9ca3af;
+  --hanro: #ff9150; --wood: #3cc9b9; --race: #6b766e; --shadow: none; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+  font-feature-settings: "palt" 0;
+  overflow-x: hidden;
+}
+.num { font-variant-numeric: tabular-nums; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 8px;
+  padding: calc(env(safe-area-inset-top) + 8px) 16px 8px;
+  background: var(--brand); color: var(--brand-ink);
+}
+.topbar h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+.horse-select {
+  flex: 1; min-width: 0; appearance: none; -webkit-appearance: none;
+  background: rgba(255,255,255,.16) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 10px center;
+  border: 0; border-radius: 10px; padding: 7px 30px 7px 12px; font-size: 16px; font-weight: 600; color: inherit;
+  text-overflow: ellipsis;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .horse-select { background-color: rgba(0,0,0,.18); } }
+.horse-select option { color: #111; }
+.icon-btn {
+  width: 38px; height: 38px; border: 0; border-radius: 10px; background: rgba(255,255,255,.16);
+  display: grid; place-items: center; color: inherit; flex: none;
+}
+.icon-btn svg { width: 20px; height: 20px; }
+
+main { max-width: 640px; margin: 0 auto; padding: 12px 16px calc(env(safe-area-inset-bottom) + 40px); }
+
+/* ---------- cards ---------- */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 12px 0; box-shadow: var(--shadow); }
+.card h2 { font-size: 13px; color: var(--muted); font-weight: 700; margin: 0 0 10px; letter-spacing: .04em; display: flex; align-items: center; gap: 8px; }
+.card h2 .spacer { flex: 1; }
+.empty { color: var(--muted); font-size: 14px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px;
+  padding: 9px 14px; font-size: 15px; font-weight: 600; min-height: 42px;
+}
+.btn.primary { background: var(--brand); color: var(--brand-ink); border-color: transparent; }
+.btn.big { width: 100%; font-size: 17px; min-height: 54px; border-radius: 12px; }
+.btn.small { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.btn.danger { color: var(--bad); }
+.btn:disabled { opacity: .5; }
+.row-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.row-btns .btn { flex: 1; }
+.link-btn { background: none; border: 0; color: var(--brand); font-weight: 600; padding: 4px; font-size: 13px; }
+
+.progress { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 6px; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .2s; }
+
+/* ---------- summary ---------- */
+.summary { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
+.rank-badge {
+  width: 76px; height: 76px; border-radius: 18px; display: grid; place-items: center; text-align: center;
+  color: #fff; font-weight: 800; line-height: 1;
+}
+.rank-badge b { font-size: 38px; display: block; }
+.rank-badge span { font-size: 13px; font-weight: 700; opacity: .92; display: block; margin-top: 2px; }
+.rank-S { background: var(--rank-s); } .rank-A { background: var(--rank-a); }
+.rank-B { background: var(--rank-b); } .rank-C { background: var(--rank-c); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rank-badge { color: #0b0f0c; } }
+:root[data-theme="dark"] .rank-badge { color: #0b0f0c; }
+.rank-badge.pending { background: transparent; border: 2px dashed var(--muted); color: var(--muted); }
+.rank-badge.pending b { font-size: 15px; }
+.summary .race-name { font-size: 18px; font-weight: 700; line-height: 1.3; }
+.meta { font-size: 13px; color: var(--muted); }
+.criteria { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.criteria li { display: grid; grid-template-columns: 4.6em 1fr; gap: 8px; font-size: 14px; background: var(--surface-2); border-radius: 8px; padding: 7px 10px; }
+.criteria li b { font-weight: 700; }
+.criteria .up b { color: var(--good); } .criteria .keep b { color: var(--muted); } .criteria .down b { color: var(--bad); }
+.history { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); white-space: nowrap; }
+.chip.rank { font-weight: 700; }
+.chip.c-S { color: var(--rank-s); } .chip.c-A { color: var(--rank-a); } .chip.c-B { color: var(--rank-b); } .chip.c-C { color: var(--rank-c); }
+
+/* ---------- race cards ---------- */
+.race-card { padding: 0; overflow: hidden; }
+.race-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.race-head .t { flex: 1; min-width: 0; }
+.race-head .t .n { font-weight: 700; font-size: 16px; overflow-wrap: anywhere; }
+.race-head .t .d { font-size: 12px; color: var(--muted); }
+.race-head .score { text-align: center; min-width: 52px; }
+.race-head .score b { font-size: 26px; font-weight: 800; line-height: 1; display: block; }
+.race-head .score span { font-size: 12px; color: var(--muted); }
+.race-head .score.r-S b { color: var(--rank-s); } .race-head .score.r-A b { color: var(--rank-a); }
+.race-head .score.r-B b { color: var(--rank-b); } .race-head .score.r-C b { color: var(--rank-c); }
+.race-head .score.pending b { font-size: 13px; color: var(--muted); }
+.result { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); white-space: nowrap; }
+.race-body { padding: 10px 14px 14px; }
+.slots { display: grid; gap: 4px; }
+.slot { display: grid; grid-template-columns: 3.4em 3em 1fr auto; gap: 8px; align-items: center; font-size: 14px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.slot:last-child { border-bottom: 0; }
+.slot .k { color: var(--muted); font-size: 12px; font-weight: 700; }
+.slot .dt { color: var(--muted); font-size: 13px; }
+.slot .main { min-width: 0; }
+.slot .main small { color: var(--muted); font-size: 12px; display: block; }
+.course { display: inline-block; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 5px; color: #fff; margin-right: 4px; vertical-align: 1px; }
+.course.hanro { background: var(--hanro); } .course.wood { background: var(--wood); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .course { color: #0b0f0c; } }
+:root[data-theme="dark"] .course { color: #0b0f0c; }
+.shape { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.shape.加速 { color: var(--good); } .shape.減速, .shape.大きく減速 { color: var(--bad); } .shape.維持 { color: var(--muted); }
+.base { font-size: 12px; color: var(--muted); margin: 8px 0 6px; }
+.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.items li { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 13px; align-items: baseline; }
+.pts { font-weight: 800; font-size: 13px; min-width: 2.6em; text-align: right; }
+.pts.plus { color: var(--good); } .pts.minus { color: var(--bad); } .pts.zero { color: var(--muted); }
+.note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+/* ---------- chart ---------- */
+.chart-wrap { position: relative; }
+.chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
+.chart text { font-size: 10px; fill: var(--muted); font-family: inherit; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .raceline { stroke: var(--race); stroke-width: 1; stroke-dasharray: 3 3; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+.chart-tip { font-size: 13px; min-height: 1.6em; margin-top: 4px; }
+
+/* ---------- races editor & workouts ---------- */
+.list { display: grid; gap: 0; }
+.list-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.list-row:last-child { border-bottom: 0; }
+.list-row .sub { color: var(--muted); font-size: 12px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.form-grid .full { grid-column: 1 / -1; }
+label.f { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+input.in, select.in {
+  width: 100%; min-width: 0; font-size: 16px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface); color: var(--text);
+}
+input.in:focus, select.in:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+
+.wk { display: grid; grid-template-columns: 4.7em 3.4em 1fr auto; gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.wk:last-child { border-bottom: 0; }
+.wk .times { color: var(--muted); overflow-wrap: anywhere; }
+.wk.oikiri .times { color: var(--text); font-weight: 600; }
+.wk .x { background: none; border: 0; color: var(--muted); font-size: 18px; width: 30px; height: 30px; }
+details > summary { cursor: pointer; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary h2::after { content: "▸"; margin-left: auto; transition: transform .15s; }
+details[open] > summary h2::after { transform: rotate(90deg); }
+details > summary h2 { margin: 0; }
+details[open] > summary h2 { margin-bottom: 10px; }
+
+/* ---------- dialogs ---------- */
+dialog { border: 0; padding: 0; background: var(--bg); color: var(--text); }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog.sheet { width: 100%; max-width: 100%; height: 100%; max-height: 100%; margin: 0; }
+dialog.sheet[open] { display: flex; flex-direction: column; }
+.sheet-head { padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.sheet-head h3 { margin: 0; font-size: 17px; }
+.sheet-head .sub { font-size: 13px; color: var(--muted); }
+.sheet-tools { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.sheet-tools label { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.sheet-tools select { width: auto; padding: 5px 8px; }
+.sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 16px 16px; }
+.sheet-foot { display: flex; gap: 8px; padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px); background: var(--surface); border-top: 1px solid var(--line); }
+.sheet-foot .btn { flex: 1; }
+
+.cf-row { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px; margin: 8px 0; }
+.cf-row.has-warn { border-color: var(--warn); }
+.cf-row.excluded { opacity: .45; }
+.cf-row.excluded .cf-grid, .cf-row.excluded .cf-top input, .cf-row.excluded .cf-top select { pointer-events: none; }
+.cf-img { display: block; width: 100%; height: auto; border-radius: 6px; margin-bottom: 6px; background: #fff; }
+.cf-imgwrap { overflow-x: auto; margin-bottom: 6px; border-radius: 6px; -webkit-overflow-scrolling: touch; }
+.cf-imgwrap .cf-img { margin: 0; }
+.cf-imgwrap.zoom .cf-img { width: 220%; max-width: none; }
+.cf-top { display: grid; grid-template-columns: 1fr 4.4em 5.4em auto; gap: 6px; align-items: center; }
+.cf-top input, .cf-top select, .cf-grid input { font-size: 16px; padding: 6px 4px; text-align: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); width: 100%; min-width: 0; }
+.cf-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-top: 6px; }
+.cf-grid label { display: grid; gap: 1px; font-size: 10px; color: var(--muted); text-align: center; }
+.cf-grid input.bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); }
+.cf-msg { font-size: 12px; margin-top: 6px; }
+.cf-msg .w { color: var(--warn); }
+.cf-msg .i { color: var(--muted); }
+.cf-msg .w::before { content: "⚠ "; }
+.tag { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.tag.new { color: var(--good); } .tag.upd { color: var(--warn); }
+.cf-toggle { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); font-size: 15px; }
+
+dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; background: var(--surface); }
+.menu-list { display: grid; }
+.menu-list button { text-align: left; background: none; border: 0; padding: 12px 12px; border-radius: 10px; font-size: 15px; }
+.menu-list button:active { background: var(--surface-2); }
+.menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.menu-list .danger { color: var(--bad); }
+.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 100; max-width: calc(100vw - 32px); }
+.foot { text-align: center; font-size: 12px; color: var(--muted); margin-top: 20px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1>調教ジャッジ</h1>
+  <select id="horseSelect" class="horse-select" aria-label="馬を選択"></select>
+  <button class="icon-btn" id="menuBtn" aria-label="メニュー">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+  </button>
+</header>
+
+<main>
+  <section class="card" id="importCard">
+    <label class="btn primary big" for="fileInput">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/></svg>
+      スクショを読み込む
+    </label>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    <div class="row-btns">
+      <button class="btn small" id="manualBtn">手入力で追加</button>
+      <button class="btn small" id="csvBtn">CSVを読み込む</button>
+    </div>
+    <div class="progress" id="progress" hidden><span id="progressText"></span><div class="bar"><i id="progressBar"></i></div></div>
+    <input type="file" id="csvInput" accept=".csv,text/csv,.json,application/json,text/plain" hidden>
+  </section>
+
+  <section class="card" id="summaryCard"></section>
+
+  <section class="card" id="racesCard">
+    <h2>出走レース<span class="spacer"></span><button class="link-btn" id="addRaceToggle">＋ 追加</button></h2>
+    <div class="list" id="raceList"></div>
+    <form id="raceForm" class="form-grid" hidden>
+      <label class="f">日付<input class="in" type="date" name="date" required></label>
+      <label class="f">着順（未出走は空欄）<input class="in" type="text" name="result" placeholder="例 4着"></label>
+      <label class="f full">レース名<input class="in" type="text" name="name" placeholder="例 スワンS(GII)" required></label>
+      <div class="full row-btns" style="margin-top:0">
+        <button type="button" class="btn" id="raceCancel">キャンセル</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+      <input type="hidden" name="index">
+    </form>
+  </section>
+
+  <section class="card" id="chartCard">
+    <h2>追い切り ラスト1F の推移</h2>
+    <div class="chart-wrap" id="chartWrap"></div>
+    <div class="legend"><span><i style="background:var(--hanro)"></i>坂路</span><span><i style="background:var(--wood)"></i>ウッド</span><span>┆ 出走日（上ほど速い）</span></div>
+    <div class="chart-tip num" id="chartTip"></div>
+  </section>
+
+  <div id="raceCards"></div>
+
+  <details class="card" id="workoutsCard">
+    <summary><h2>調教データ <span id="wkCount" class="num"></span></h2></summary>
+    <div id="wkList"></div>
+  </details>
+
+  <p class="foot">画像は端末内で処理され、外部には送信されません。データはこの端末のブラウザに保存されます。</p>
+</main>
+
+<!-- 確認・修正画面 -->
+<dialog class="sheet" id="confirmDlg">
+  <div class="sheet-head">
+    <h3 id="cfTitle">読み取り結果の確認</h3>
+    <div class="sub" id="cfSub"></div>
+    <div class="sheet-tools">
+      <label>トレセン <select class="in" id="cfCenter"><option>栗東</option><option>美浦</option></select></label>
+      <label><input type="checkbox" id="cfWarnOnly"> 要確認のみ表示</label>
+      <button class="btn small" id="cfAddRow" type="button">＋ 行を追加</button>
+    </div>
+  </div>
+  <div class="sheet-body" id="cfBody"></div>
+  <div class="sheet-foot">
+    <button class="btn" id="cfCancel" type="button">キャンセル</button>
+    <button class="btn primary" id="cfSave" type="button">保存</button>
+  </div>
+</dialog>
+
+<!-- メニュー -->
+<dialog class="menu" id="menuDlg">
+  <div class="menu-list">
+    <button data-act="newHorse">＋ 馬を追加</button>
+    <button data-act="renameHorse">名前を変更</button>
+    <hr>
+    <button data-act="exportWorkouts">調教CSVを書き出し（Python版用）</button>
+    <button data-act="exportRaces">レースCSVを書き出し（Python版用）</button>
+    <button data-act="exportAll">全データをバックアップ（JSON）</button>
+    <button data-act="importAll">バックアップから復元（JSON）</button>
+    <button data-act="sample">サンプル2頭を読み込む</button>
+    <hr>
+    <button data-act="theme">表示: <span id="themeLabel">自動</span></button>
+    <button data-act="deleteHorse" class="danger">この馬を削除</button>
+    <button data-act="close">閉じる</button>
+  </div>
+</dialog>
+
+<script src="js/judge.js"></script>
+<script src="js/ocr.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OCR精度テスト</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+  table { border-collapse: collapse; font-size: 12px; }
+  td, th { border: 1px solid #ccc; padding: 2px 4px; text-align: right; }
+  .ng { background: #fdd; } .miss { background: #fec; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>OCR精度テスト</h1>
+<p>tests/screenshots/*.webp|png|jpg を読み取り、data/*.csv の正解と照合します（ローカル専用）。</p>
+<p><label>画像リスト（カンマ区切り）: <input id="list" size="60" value="1.webp:winmarvel,2.webp:winmarvel,3.webp:winmarvel,4.webp:aisansan,5.webp:aisansan,6.webp:aisansan"></label>
+<button id="run">実行</button></p>
+<pre id="log"></pre>
+<div id="out"></div>
+<script src="../js/ocr.js"></script>
+<script>
+const KEYS = ['f6','f5','f4','f3','f2','f1'];
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+
+async function loadTruth(name) {
+  const txt = await (await fetch(`../data/${name}_training.csv`)).text();
+  const [head, ...lines] = txt.trim().split(/\r?\n/);
+  const cols = head.split(',');
+  return lines.map((l) => { const v = l.split(','); const o = {}; cols.forEach((c, i) => o[c] = v[i]); return o; });
+}
+
+const qp = new URLSearchParams(location.search);
+for (const [k, v] of qp) if (k in ChokyoOCR.config) ChokyoOCR.config[k] = typeof ChokyoOCR.config[k] === 'number' ? +v : v;
+async function run() {
+  log('config ' + JSON.stringify(ChokyoOCR.config));
+  const items = document.getElementById('list').value.split(',').map((s) => s.trim().split(':'));
+  const result = { images: [], cells: 0, cellsOk: 0, rowsTruthVisible: 0, rowsFound: 0, rowsAllOk: 0, warnedRows: 0, warnedWrongRows: 0, silentWrongRows: 0 };
+  for (const [file, horse] of items) {
+    const truth = await loadTruth(horse);
+    const byDate = new Map(truth.map((t) => [t.date + ' ' + t.time, t]));
+    const blob = await (await fetch(`screenshots/${file}`)).blob();
+    const t0 = performance.now();
+    const res = await ChokyoOCR.recognizeFile(blob, () => {});
+    const ms = Math.round(performance.now() - t0);
+    const info = { file, ms, rows: res.rows.length, words: res.words.length, rect: res.prep.rect, scale: res.prep.scale.toFixed(2), th: res.prep.threshold, details: [] };
+    for (const r of res.rows) {
+      const t = byDate.get(r.date + ' ' + r.time) || truth.find((x) => x.date === r.date);
+      const d = { date: r.date, time: r.time, course: r.course, warnings: r.warnings, notes: r.notes, clipped: r.clipped, diffs: [] };
+      if (!t) { d.diffs.push('正解なし(日付誤読?)'); info.details.push(d); continue; }
+      if (t.time !== r.time) d.diffs.push(`time ${r.time}≠${t.time}`);
+      if (t.course !== r.course) d.diffs.push(`course ${r.course}≠${t.course}`);
+      let rowOk = true;
+      for (const k of KEYS) {
+        const tv = t[k] === '' ? null : parseFloat(t[k]);
+        const rv = r[k];
+        result.cells++;
+        if (tv === rv) result.cellsOk++; else { rowOk = false; d.diffs.push(`${k} ${rv}≠${tv}`); }
+      }
+      result.rowsFound++;
+      if (rowOk && !d.diffs.length) result.rowsAllOk++;
+      const wrong = !(rowOk && !d.diffs.length);
+      if (r.warnings.length) { result.warnedRows++; if (wrong) result.warnedWrongRows++; }
+      else if (wrong) result.silentWrongRows++;
+      info.details.push(d);
+    }
+    result.images.push(info);
+    (result.byHorse = result.byHorse || {})[horse] = (result.byHorse[horse] || []).concat([res.rows]);
+    log(`${file}: ${res.rows.length}行 ${ms}ms crop=${JSON.stringify(res.prep.rect)} scale=${info.scale} th=${info.th}`);
+    for (const d of info.details) if (d.diffs.length || d.warnings.length || d.notes.length) log(`  ${d.date} ${d.time} ${d.course} ${d.clipped ? '[見切れ]' : ''} diff=[${d.diffs.join('; ')}] warn=[${d.warnings.join('; ')}] note=[${(d.notes||[]).join('; ')}]`);
+    // デバッグ用に前処理画像を表示
+    const c = res.prep.canvas; c.style.width = '400px'; c.style.border = '1px solid #999';
+    document.getElementById('out').appendChild(c);
+  }
+  log(`\nセル正解率 ${result.cellsOk}/${result.cells} = ${(100 * result.cellsOk / result.cells).toFixed(1)}%`);
+  log(`行(全項目一致) ${result.rowsAllOk}/${result.rowsFound}  警告付き行 ${result.warnedRows}（うち実際に誤り ${result.warnedWrongRows}）  警告なしの誤り ${result.silentWrongRows}`);
+  // 馬ごとに統合した結果を正解と照合
+  for (const [horse, lists] of Object.entries(result.byHorse)) {
+    const truth = await loadTruth(horse);
+    const merged = ChokyoOCR.mergeRows(lists);
+    let ok = 0, wrongWarned = 0, wrongSilent = 0, extra = 0;
+    const tk = new Map(truth.map((t) => [t.date + ' ' + t.time, t]));
+    for (const r of merged) {
+      const t = tk.get(r.date + ' ' + r.time);
+      const same = t && t.course === r.course && KEYS.every((k) => (t[k] === '' ? null : parseFloat(t[k])) === r[k]);
+      if (!t) extra++;
+      if (same) ok++; else if (r.warnings.length) wrongWarned++; else wrongSilent++;
+    }
+    const missing = truth.filter((t) => !merged.some((r) => r.date === t.date && r.time === t.time)).map((t) => t.date);
+    log(`統合 ${horse}: ${merged.length}行 / 正解${truth.length}行  完全一致${ok}  誤り(警告あり)${wrongWarned}  誤り(警告なし)${wrongSilent}  余分${extra}  欠落[${missing.join(',')}]`);
+  }
+  delete result.byHorse;
+  window.__result = result;
+}
+document.getElementById('run').onclick = () => run().catch((e) => { log('ERROR ' + e.stack); window.__result = { error: String(e) }; });
+</script>
+</body>
+</html>
