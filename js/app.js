@@ -49,6 +49,7 @@
     const h = horse();
     const results = h ? Judge.judge(h.workouts, h.races) : [];
     renderSummary(h, results);
+    renderCompare(h, results);
     renderRaceList(h);
     renderChart(h, results);
     renderRaceCards(results);
@@ -112,6 +113,124 @@
   function commentHTML(cm, withHead = true) {
     return `<div class="comment">${withHead ? `<p class="c-head">${esc(cm.head)}</p>` : ''}<ul>${cm.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>`;
   }
+
+  const normName = (n) => String(n || '').normalize('NFKC').replace(/\s/g, '');
+  function findHorseByName(name) {
+    return Object.keys(state.horses).find((id) => normName(state.horses[id].name) === normName(name)) || null;
+  }
+
+  // ------------------------------------------------------- 出走馬の比較 ----
+  const raceKey = (r) => `${r.date}|${normName(shortName(r.name)).toUpperCase()}`;
+
+  /** 全馬の判定（馬ID → results） */
+  function judgeAll() {
+    const out = {};
+    for (const [id, h] of Object.entries(state.horses)) out[id] = Judge.judge(h.workouts, h.races);
+    return out;
+  }
+
+  function renderCompare(h, results) {
+    const el = $('#compareCard');
+    if (!h || !results.length) { el.hidden = true; return; }
+    const target = results[targetIndex(results)];
+    const key = raceKey(target.race);
+    const all = judgeAll();
+    const entries = [];
+    for (const [id, rs] of Object.entries(all)) {
+      const i = rs.findIndex((j) => raceKey(j.race) === key);
+      if (i >= 0) entries.push({ id, name: state.horses[id].name, j: rs[i], cm: Comment.make(rs, i) });
+    }
+    if (entries.length < 2) { el.hidden = true; return; }
+    const order = (e) => (e.j.status === '判定済' ? 0 : e.j.status === '最終追い切り待ち' ? 1 : 2);
+    entries.sort((a, b) => order(a) - order(b) || (b.j.score ?? 0) - (a.j.score ?? 0) || a.name.localeCompare(b.name, 'ja'));
+    el.hidden = false;
+    el.innerHTML = `<h2>${esc(shortName(target.race.name))} の登録馬（${entries.length}頭）</h2>
+      <div class="cmp">${entries.map((e, n) => {
+        const j = e.j;
+        const badge = j.status === '判定済'
+          ? `<span class="cmp-rank rank-${j.rank}">${j.rank}</span><span class="cmp-score num">${j.score}</span>`
+          : `<span class="cmp-rank pending">${j.status === '最終追い切り待ち' ? '待' : '－'}</span><span class="cmp-score"></span>`;
+        const fin = j.slots['最終'];
+        const sub = fin ? `最終 ${fin.course} ${fin.mainKey.slice(1)}F ${f1d(fin.main)}・1F ${f1d(fin.f1)}` : j.status;
+        return `<button class="cmp-row${e.id === state.current ? ' me' : ''}" data-horse="${e.id}">
+          <span class="cmp-no num">${j.status === '判定済' ? n + 1 : ''}</span>${badge}
+          <span class="cmp-body"><b>${esc(e.name)}</b><small class="num">${esc(sub)}</small><small>${esc(j.status === '最終追い切り待ち' ? `ラスト1F ${Judge.pyFmt(j.baseline.f1 - 0.1, 1)}以下なら上向き` : e.cm.head)}</small></span></button>`;
+      }).join('')}</div>`;
+  }
+
+  $('#compareCard').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-horse]'); if (!b || b.dataset.horse === state.current) return;
+    state.current = b.dataset.horse; save(); render(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // ------------------------------------------------------------ 成績の検証 ----
+  function finishOf(result) {
+    const m = /(\d+)\s*着/.exec(String(result || '').normalize('NFKC'));
+    return m ? +m[1] : null;
+  }
+
+  /** 順位相関（スピアマン、同順位は平均順位） */
+  function spearman(xs, ys) {
+    const rankOf = (vals) => {
+      const idx = vals.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+      const r = [];
+      for (let i = 0; i < idx.length;) {
+        let k = i;
+        while (k + 1 < idx.length && idx[k + 1][0] === idx[i][0]) k++;
+        for (let t = i; t <= k; t++) r[idx[t][1]] = (i + k) / 2 + 1;
+        i = k + 1;
+      }
+      return r;
+    };
+    const a = rankOf(xs), b = rankOf(ys);
+    const ma = a.reduce((s, x) => s + x, 0) / a.length, mb = b.reduce((s, x) => s + x, 0) / b.length;
+    let num = 0, da = 0, db = 0;
+    a.forEach((x, i) => { num += (x - ma) * (b[i] - mb); da += (x - ma) ** 2; db += (b[i] - mb) ** 2; });
+    return da && db ? num / Math.sqrt(da * db) : null;
+  }
+
+  function openStats() {
+    const all = judgeAll();
+    const rows = [];
+    let skipped = 0;
+    for (const [id, rs] of Object.entries(all)) {
+      for (const j of rs) {
+        if (!j.race.result) continue;
+        const fin = finishOf(j.race.result);
+        if (j.status !== '判定済' || fin == null) { skipped++; continue; }
+        rows.push({ horse: state.horses[id].name, race: j.race, rank: j.rank, score: j.score, fin });
+      }
+    }
+    const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '-');
+    const agg = ['S', 'A', 'B', 'C'].map((rk) => {
+      const g = rows.filter((r) => r.rank === rk);
+      return {
+        rk, n: g.length, avg: g.length ? (g.reduce((t, r) => t + r.fin, 0) / g.length).toFixed(1) : '-',
+        win: pct(g.filter((r) => r.fin === 1).length, g.length),
+        top2: pct(g.filter((r) => r.fin <= 2).length, g.length),
+        top3: pct(g.filter((r) => r.fin <= 3).length, g.length),
+      };
+    });
+    // 点数が高いほど着順が良い（数字が小さい）なら正になるように、点数の符号を反転して比べる
+    const rho = rows.length >= 3 ? spearman(rows.map((r) => -r.score), rows.map((r) => r.fin)) : null;
+    const body = $('#statsBody');
+    if (!rows.length) {
+      body.innerHTML = '<p class="empty">着順（例「4着」）が入った判定済みのレースがまだありません。出走レースに着順を入れると集計されます。</p>';
+    } else {
+      const rhoText = rho == null ? '' : `<p class="meta">点数と着順の順位相関: <b class="num">${rho.toFixed(2)}</b>（+1に近いほど「点数が高い馬ほど着順が良い」。0付近なら関係なし）</p>`;
+      body.innerHTML = `
+        ${rows.length < 30 ? `<p class="warnbox">まだ ${rows.length} レース分なので参考程度です。30レース以上たまると傾向が見えてきます。</p>` : ''}
+        <table class="stats num"><thead><tr><th>ランク</th><th>件数</th><th>平均着順</th><th>勝率</th><th>連対率</th><th>3着内率</th></tr></thead>
+        <tbody>${agg.map((g) => `<tr><td><span class="cmp-rank rank-${g.rk}">${g.rk}</span></td><td>${g.n}</td><td>${g.avg}</td><td>${g.win}</td><td>${g.top2}</td><td>${g.top3}</td></tr>`).join('')}</tbody></table>
+        ${rhoText}
+        ${skipped ? `<p class="meta">着順はあるが判定できなかったレース（データ不足など）${skipped}件は除外しています</p>` : ''}
+        <h4>レース一覧（点数順）</h4>
+        <div class="list">${rows.sort((a, b) => b.score - a.score).map((r) => `<div class="list-row"><div><b>${esc(r.horse)}</b> <span class="sub">${esc(shortName(r.race.name))}</span><div class="sub num">${slash(r.race.date)}</div></div>
+          <div class="num" style="text-align:right;white-space:nowrap"><span class="chip rank c-${r.rank}">${r.rank}${r.score}</span> → <b>${r.fin}着</b></div></div>`).join('')}</div>`;
+    }
+    $('#statsDlg').showModal();
+  }
+  $('#statsClose').addEventListener('click', () => $('#statsDlg').close());
 
   const shortName = (n) => n.replace(/\(.*?\)|（.*?）/g, '').trim() || n;
 
@@ -279,10 +398,9 @@
     const files = [...ev.target.files];
     ev.target.value = '';
     if (!files.length) return;
-    if (!ensureHorse()) return;
     const prog = $('#progress'), text = $('#progressText'), bar = $('#progressBar');
     prog.hidden = false;
-    const lists = [];
+    const lists = [], names = [];
     try {
       for (let i = 0; i < files.length; i++) {
         const base = i / files.length;
@@ -294,6 +412,7 @@
         for (const r of res.rows) r.snippet = snippet(res.image, r);
         if (res.image.close) res.image.close();
         lists.push(res.rows);
+        if (res.horseName) names.push(res.horseName);
         bar.style.width = `${Math.round(((i + 1) / files.length) * 100)}%`;
       }
     } catch (e) {
@@ -305,7 +424,8 @@
     prog.hidden = true; bar.style.width = '0';
     const merged = ChokyoOCR.mergeRows(lists);
     if (!merged.length) { toast('調教の行が見つかりませんでした。JRA-VAN の調教タイム画面のスクショか確認してください'); return; }
-    openConfirm(merged.map(fromOcrRow), `${files.length}枚から${merged.length}行を読み取りました`);
+    const detected = names.length ? names.sort((a, b) => names.filter((x) => x === b).length - names.filter((x) => x === a).length)[0] : null;
+    openConfirm(merged.map(fromOcrRow), `${files.length}枚から${merged.length}行を読み取りました${detected ? `・馬名「${detected}」を検出` : ''}`, detected);
   });
 
   function snippet(img, r) {
@@ -364,16 +484,30 @@
     return { out, warn: [...new Set(warn)] };
   }
 
+  /** 確認画面で選ばれている保存先（既存の馬 or null = 新規） */
+  function targetHorse() {
+    const v = $('#cfHorse').value;
+    return v && !v.startsWith('new:') ? state.horses[v] || null : null;
+  }
+
   function existingStatus(out) {
-    const h = horse(); if (!h || !out.date) return 'new';
+    const h = targetHorse(); if (!h || !out.date) return 'new';
     const ex = h.workouts.find((w) => w.date === out.date && w.time === (out.time || ''));
     if (!ex) return 'new';
     return KEYS.every((k) => ex[k] === out[k]) && ex.course === out.course ? 'same' : 'upd';
   }
 
-  function openConfirm(rows, sub) {
+  function openConfirm(rows, sub, detectedName) {
     cfRows = rows;
-    const h = horse();
+    const sel = $('#cfHorse');
+    const ids = Object.keys(state.horses);
+    const hit = detectedName ? findHorseByName(detectedName) : null;
+    let opts = ids.map((id) => `<option value="${id}">${esc(state.horses[id].name)}</option>`).join('');
+    if (detectedName && !hit) opts += `<option value="new:${esc(detectedName)}">＋ 新規: ${esc(detectedName)}</option>`;
+    opts += '<option value="new:">＋ 新しい馬…</option>';
+    sel.innerHTML = opts;
+    sel.value = hit || (detectedName ? `new:${detectedName}` : state.current && state.horses[state.current] ? state.current : 'new:');
+    const h = targetHorse() || horse();
     $('#cfCenter').value = (h && h.center) || '栗東';
     $('#cfSub').textContent = sub || '';
     $('#cfWarnOnly').checked = false;
@@ -455,6 +589,10 @@
     $('#cfSave').textContent = `保存（${active.length}行）`;
   }
 
+  $('#cfHorse').addEventListener('change', () => {
+    const h = targetHorse(); if (h && h.center) $('#cfCenter').value = h.center;
+    [...$('#cfBody').children].forEach((el, i) => updateCfRow(el, cfRows[i]));
+  });
   $('#cfWarnOnly').addEventListener('change', () => {
     [...$('#cfBody').children].forEach((el, i) => updateCfRow(el, cfRows[i]));
   });
@@ -472,7 +610,17 @@
   dlg.addEventListener('cancel', (ev) => { ev.preventDefault(); $('#cfCancel').click(); });
 
   $('#cfSave').addEventListener('click', () => {
-    const h = ensureHorse(); if (!h) return;
+    let h = targetHorse();
+    const sv = $('#cfHorse').value;
+    if (!h) {
+      let name = sv.startsWith('new:') ? sv.slice(4) : '';
+      if (!name) name = (prompt('馬名を入力してください') || '').trim();
+      if (!name) return;
+      const id = findHorseByName(name);
+      if (id) { h = state.horses[id]; state.current = id; } else h = newHorse(name);
+    } else {
+      state.current = sv;
+    }
     const center = $('#cfCenter').value;
     const active = cfRows.filter((r) => !r.excluded).map((r) => ({ r, ...rowWarnings(r) }));
     const unsavable = active.filter(({ out }) => !out.date || out.f1 == null || out.time === null);
@@ -504,7 +652,6 @@
   }
 
   $('#manualBtn').addEventListener('click', () => {
-    if (!ensureHorse()) return;
     const r = blankRow(); r.date = slash(todayISO());
     openConfirm([r], '手入力。坂路は 4F〜1F、ウッドは 5F（6F）〜1F を入力');
   });
@@ -576,6 +723,7 @@
       case 'exportAll': download(`chokyo-judge-backup-${todayISO()}.json`, JSON.stringify(state, null, 1), 'application/json'); break;
       case 'importAll': $('#csvInput').click(); break;
       case 'sample': await loadSamples(); break;
+      case 'stats': openStats(); break;
       case 'theme': cycleTheme(); break;
     }
   });
@@ -605,7 +753,6 @@
       }
       const head = text.replace(/^﻿/, '').split(/\r?\n/)[0];
       if (/\bf1\b/.test(head)) {
-        if (!ensureHorse()) return;
         const rows = Judge.workoutsFromCSV(text).map((w) => {
           const r = { date: slash(w.date), time: w.time, course: w.course === 'ウッド' ? 'ウッド' : '坂路', snippet: null, warnings: [], notes: [], excluded: false, edited: false };
           for (const k of KEYS) r[k] = f1d(w[k]);

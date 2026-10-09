@@ -21,7 +21,7 @@
 
   const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   // 前処理・OCRの設定（テストページから上書きして比較できるように公開）
-  const config = { targetW: 1600, lo: 80, hi: 195, psm: '11' };
+  const config = { targetW: 1600, lo: 80, hi: 195, psm: '11', detectName: true };
   const KEYS = ['f6', 'f5', 'f4', 'f3', 'f2', 'f1'];
   const LAP_MIN = 10, LAP_MAX = 30;
 
@@ -97,18 +97,21 @@
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h, 0, 0, w, h);
+    levels(ctx, w, h);
+    return { canvas: c, rect, scale, threshold: config.hi };
+  }
+
+  // レベル補正: 背景（白 254 / 黄 246 / グレーのセル 210 / 罫線）を真っ白に飛ばし、
+  // 文字のアンチエイリアスは残す（二値化は Tesseract 内部に任せる）
+  function levels(ctx, w, h) {
     const id = ctx.getImageData(0, 0, w, h), d = id.data;
-    // レベル補正: 背景（白 254 / 黄 246 / グレーのセル 210 / 罫線）を真っ白に飛ばし、
-    // 文字のアンチエイリアスは残す（二値化は Tesseract 内部に任せる）
     const { lo, hi } = config;
     for (let i = 0; i < d.length; i += 4) {
       const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
       const v = g <= lo ? 0 : g >= hi ? 255 : Math.round((g - lo) * 255 / (hi - lo));
       d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
     }
-    const th = hi;
     ctx.putImageData(id, 0, 0);
-    return { canvas: c, rect, scale, threshold: th };
   }
 
   // ------------------------------------------------------------- OCR 本体 ----
@@ -150,7 +153,53 @@
       r.bandBottom = Math.min(img.height, Math.ceil(prep.rect.y + r.bandBottom / prep.scale));
       r.bandLeft = prep.rect.x; r.bandWidth = prep.rect.w;
     }
-    return { rows, image: img, prep, words };
+    // 表より上に余白（馬名などのヘッダー）があれば、日本語OCRで馬名を読む
+    let horseName = null;
+    const headerBottom = rows.length ? rows[0].bandTop : null;
+    if (config.detectName && headerBottom != null && headerBottom - prep.rect.y > prep.rect.w * 0.12) {
+      try { horseName = await detectHorseName(img, { x: prep.rect.x, y: prep.rect.y, w: prep.rect.w, h: headerBottom - prep.rect.y }); }
+      catch (e) { console.warn('馬名の読み取りに失敗', e); }
+    }
+    return { rows, image: img, prep, words, horseName };
+  }
+
+  // ------------------------------------------------------------ 馬名の読み取り ----
+  // 画面上部の「調教タイム / 馬名 / 全て表示・坂路… / 直近60件」から、カタカナだけの行で一番大きい文字を馬名とみなす
+  const NAME_STOP = new Set(['ウッドチップ', 'ウッド', 'タイム', 'メニュー', 'トップ', 'ニュース']);
+  let jpnPromise = null;
+  function getJpnWorker() {
+    if (!jpnPromise) {
+      jpnPromise = (async () => {
+        if (typeof Tesseract === 'undefined') await loadScript(TESSERACT_URL);
+        const w = await Tesseract.createWorker('jpn', 1);
+        await w.setParameters({ tessedit_pageseg_mode: '11' });
+        return w;
+      })().catch((e) => { jpnPromise = null; throw e; });
+    }
+    return jpnPromise;
+  }
+
+  async function detectHorseName(img, r) {
+    const scale = Math.min(4, config.targetW / r.w);
+    const c = document.createElement('canvas');
+    c.width = Math.round(r.w * scale); c.height = Math.max(1, Math.round(r.h * scale));
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, c.width, c.height);
+    levels(ctx, c.width, c.height);
+    const worker = await getJpnWorker();
+    const { data } = await worker.recognize(c);
+    return pickHorseName((data.lines || []).map((l) => ({ text: l.text, h: l.bbox.y1 - l.bbox.y0, conf: l.confidence })));
+  }
+
+  /** OCR の行から馬名らしいものを選ぶ（DOM非依存） */
+  function pickHorseName(lines) {
+    const cands = lines
+      .map((l) => ({ ...l, t: l.text.replace(/[\s　]/g, '').replace(/[|｜_]/g, '') }))
+      .filter((l) => /^[ァ-ヴー]{2,9}$/.test(l.t) && !NAME_STOP.has(l.t) && !/^ー/.test(l.t));
+    if (!cands.length) return null;
+    cands.sort((a, b) => b.h - a.h);
+    return cands[0].t;
   }
 
   // ------------------------------------------------- 単語 → 行（DOM非依存） ----
@@ -401,5 +450,5 @@
     return out;
   }
 
-  return { config, recognizeFile, parseWords, parseDate, parseNumber, validateRow, mergeRows, preprocess, getWorker, KEYS };
+  return { config, recognizeFile, pickHorseName, parseWords, parseDate, parseNumber, validateRow, mergeRows, preprocess, getWorker, KEYS };
 });

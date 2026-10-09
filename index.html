@@ -273,6 +273,24 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
 .menu-list button:active { background: var(--surface-2); }
 .menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 .menu-list .danger { color: var(--bad); }
+.cmp { display: grid; gap: 6px; }
+.cmp-row { display: grid; grid-template-columns: 1.4em 2.2em 2.2em 1fr; gap: 8px; align-items: center; text-align: left; width: 100%;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.cmp-row.me { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); }
+.cmp-no { color: var(--muted); font-size: 13px; text-align: center; }
+.cmp-rank { display: inline-grid; place-items: center; width: 2em; height: 2em; border-radius: 8px; color: #fff; font-weight: 800; }
+.cmp-rank.pending { background: transparent; border: 1.5px dashed var(--muted); color: var(--muted); font-size: 12px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cmp-rank:not(.pending) { color: #0b0f0c; } }
+:root[data-theme="dark"] .cmp-rank:not(.pending) { color: #0b0f0c; }
+.cmp-score { font-weight: 800; font-size: 17px; }
+.cmp-body { min-width: 0; display: grid; }
+.cmp-body b { font-size: 15px; }
+.cmp-body small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+table.stats { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; background: var(--surface); }
+table.stats th, table.stats td { padding: 8px 2px; text-align: center; border-bottom: 1px solid var(--line); }
+table.stats th { font-size: 11px; color: var(--muted); font-weight: 700; }
+.warnbox { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+#statsBody h4 { font-size: 13px; color: var(--muted); margin: 16px 0 4px; }
 .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 100; max-width: calc(100vw - 32px); }
 .foot { text-align: center; font-size: 12px; color: var(--muted); margin-top: 20px; }
 </style>
@@ -302,6 +320,8 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
   </section>
 
   <section class="card" id="summaryCard"></section>
+
+  <section class="card" id="compareCard" hidden></section>
 
   <section class="card" id="racesCard">
     <h2>出走レース<span class="spacer"></span><button class="link-btn" id="addRaceToggle">＋ 追加</button></h2>
@@ -341,6 +361,7 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
     <h3 id="cfTitle">読み取り結果の確認</h3>
     <div class="sub" id="cfSub"></div>
     <div class="sheet-tools">
+      <label>保存先 <select class="in" id="cfHorse" style="max-width:11em"></select></label>
       <label>トレセン <select class="in" id="cfCenter"><option>栗東</option><option>美浦</option></select></label>
       <label><input type="checkbox" id="cfWarnOnly"> 要確認のみ表示</label>
       <button class="btn small" id="cfAddRow" type="button">＋ 行を追加</button>
@@ -353,6 +374,13 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
   </div>
 </dialog>
 
+<!-- 成績の検証 -->
+<dialog class="sheet" id="statsDlg">
+  <div class="sheet-head"><h3>成績の検証</h3><div class="sub">登録した全馬の判定済みレースについて、ランクと着順の関係を集計</div></div>
+  <div class="sheet-body" id="statsBody"></div>
+  <div class="sheet-foot"><button class="btn" id="statsClose" type="button">閉じる</button></div>
+</dialog>
+
 <!-- メニュー -->
 <dialog class="menu" id="menuDlg">
   <div class="menu-list">
@@ -363,6 +391,8 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
     <button data-act="exportRaces">レースCSVを書き出し（Python版用）</button>
     <button data-act="exportAll">全データをバックアップ（JSON）</button>
     <button data-act="importAll">バックアップから復元（JSON）</button>
+    <button data-act="stats">成績の検証（ランクと着順）</button>
+    <hr>
     <button data-act="sample">サンプル2頭を読み込む</button>
     <hr>
     <button data-act="theme">表示: <span id="themeLabel">自動</span></button>
