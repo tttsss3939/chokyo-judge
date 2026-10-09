@@ -86,6 +86,7 @@ python -m http.server 8765   # → http://localhost:8765/tests/ocr_test.html で
 index.html             画面（CSS 込み）
 js/app.js              画面の動作・保存（localStorage）・チャート
 js/judge.js            判定ロジック（training_judge.py の移植）
+js/comment.js          講評文の生成（ルールベース、点数には影響しない）
 js/ocr.js              スクショ読み取り
 manifest.webmanifest   ホーム画面追加用
 icons/                 アイコン（tests/make_icons.py で生成）

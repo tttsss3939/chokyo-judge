@@ -189,6 +189,11 @@ main { max-width: 640px; margin: 0 auto; padding: 12px 16px calc(env(safe-area-i
 .pts { font-weight: 800; font-size: 13px; min-width: 2.6em; text-align: right; }
 .pts.plus { color: var(--good); } .pts.minus { color: var(--bad); } .pts.zero { color: var(--muted); }
 .note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.comment { margin: 12px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--brand); }
+.race-body .comment { margin: 10px 0; }
+.comment .c-head { margin: 0 0 4px; font-weight: 700; font-size: 15px; }
+.comment ul { margin: 0; padding-left: 1.1em; font-size: 13.5px; }
+.comment li { margin: 2px 0; }
 
 /* ---------- chart ---------- */
 .chart-wrap { position: relative; }
@@ -367,6 +372,7 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
 </dialog>
 
 <script src="js/judge.js"></script>
+<script src="js/comment.js"></script>
 <script src="js/ocr.js"></script>
 <script src="js/app.js"></script>
 </body>

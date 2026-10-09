@@ -100,11 +100,17 @@
     }
     const hist = results.filter((r, i) => i !== ti && r.status === '判定済')
       .map((r) => `<span class="chip"><span>${esc(shortName(r.race.name))}</span><b class="chip rank c-${r.rank}" style="border:0;padding:0;background:none">${r.rank}${r.score}</b>${r.race.result ? `→ ${esc(r.race.result)}` : ''}</span>`).join('');
+    const comment = j.status === 'データ不足' ? '' : commentHTML(Comment.make(results, ti));
     el.innerHTML = `<h2>判定サマリー</h2>
       <div class="summary">${badge}<div><div class="race-name">${esc(j.race.name)}</div>
       <div class="meta num">${slash(j.race.date)}（${when}）${j.race.result ? '・' + esc(j.race.result) : ''}</div></div></div>
+      ${comment}
       ${j.status === '最終追い切り待ち' ? body : `<div style="margin-top:10px">${body}</div>`}
       ${hist ? `<div class="history">${hist}</div>` : ''}`;
+  }
+
+  function commentHTML(cm, withHead = true) {
+    return `<div class="comment">${withHead ? `<p class="c-head">${esc(cm.head)}</p>` : ''}<ul>${cm.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>`;
   }
 
   const shortName = (n) => n.replace(/\(.*?\)|（.*?）/g, '').trim() || n;
@@ -131,7 +137,7 @@
 
   function renderRaceCards(results) {
     const el = $('#raceCards');
-    el.innerHTML = [...results].reverse().map((j) => {
+    el.innerHTML = results.map((j, i) => ({ j, i })).reverse().map(({ j, i }) => {
       const r = j.race;
       let score;
       if (j.status === '判定済') score = `<div class="score r-${j.rank}"><b>${j.rank}</b><span class="num">${j.score}点</span></div>`;
@@ -143,6 +149,7 @@
         body += `<div class="base num">基準: ${esc(j.baseline.source)}（過去最終${j.baseline.n}本）全体 ${Judge.pyStr(j.baseline.main)} / ラスト1F ${Judge.pyStr(j.baseline.f1)}・直近14日 ${j.volume14d}本</div>`;
       }
       if (j.status === '判定済') {
+        body += commentHTML(Comment.make(results, i));
         body += `<ul class="items">${j.items.map((it) => {
           const p = it.points;
           const cls = p == null ? 'zero' : p > 0 ? 'plus' : p < 0 ? 'minus' : 'zero';
