@@ -327,9 +327,11 @@ table.stats th { font-size: 11px; color: var(--muted); font-weight: 700; }
     <h2>出走レース<span class="spacer"></span><button class="link-btn" id="addRaceToggle">＋ 追加</button></h2>
     <div class="list" id="raceList"></div>
     <form id="raceForm" class="form-grid" hidden>
+      <label class="f full" id="racePickWrap">登録済みのレースから選ぶ<select class="in" id="racePick"></select></label>
       <label class="f">日付<input class="in" type="date" name="date" required></label>
       <label class="f">着順（未出走は空欄）<input class="in" type="text" name="result" placeholder="例 4着"></label>
-      <label class="f full">レース名<input class="in" type="text" name="name" placeholder="例 スワンS(GII)" required></label>
+      <label class="f full">レース名<input class="in" type="text" name="name" placeholder="例 スワンS(GII)" list="raceNames" autocomplete="off" required></label>
+      <datalist id="raceNames"></datalist>
       <div class="full row-btns" style="margin-top:0">
         <button type="button" class="btn" id="raceCancel">キャンセル</button>
         <button type="submit" class="btn primary">保存</button>

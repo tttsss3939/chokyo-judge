@@ -661,7 +661,36 @@
   $('#addRaceToggle').addEventListener('click', () => {
     if (!ensureHorse()) return;
     raceForm.reset(); raceForm.index.value = ''; raceForm.hidden = !raceForm.hidden;
-    if (!raceForm.hidden) raceForm.date.focus();
+    if (!raceForm.hidden) { fillRacePicker(true); ($('#racePickWrap').hidden ? raceForm.date : $('#racePick')).focus(); }
+  });
+
+  /** 他の馬で登録済みのレース（この馬にまだ無いもの）を選択肢に。レース名の入力候補も全馬から */
+  function fillRacePicker(show) {
+    const h = horse();
+    const mine = new Set((h ? h.races : []).map(raceKey));
+    const seen = new Map(), names = new Set();
+    for (const hh of Object.values(state.horses)) {
+      for (const r of hh.races) {
+        names.add(r.name);
+        const k = raceKey(r);
+        if (mine.has(k)) continue;
+        const e = seen.get(k) || { date: r.date, name: r.name, n: 0 };
+        e.n++; seen.set(k, e);
+      }
+    }
+    const list = [...seen.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
+    const today = todayISO();
+    $('#racePick').innerHTML = '<option value="">選択してください</option>' + list.map((r, i) =>
+      `<option value="${i}">${r.date >= today ? '◆ ' : ''}${slash(r.date)} ${esc(r.name)}（${r.n}頭登録）</option>`).join('');
+    $('#racePick')._list = list;
+    $('#racePickWrap').hidden = !show || !list.length;
+    $('#raceNames').innerHTML = [...names].sort((a, b) => a.localeCompare(b, 'ja')).map((n) => `<option value="${esc(n)}">`).join('');
+  }
+  $('#racePick').addEventListener('change', (ev) => {
+    const r = ev.target._list && ev.target._list[+ev.target.value];
+    if (!r) return;
+    raceForm.date.value = r.date; raceForm.name.value = r.name;
+    raceForm.result.focus();
   });
   $('#raceCancel').addEventListener('click', () => { raceForm.hidden = true; });
   raceForm.addEventListener('submit', (ev) => {
@@ -679,6 +708,7 @@
     const e = ev.target.closest('[data-edit-race]'), d = ev.target.closest('[data-del-race]');
     if (e) {
       const r = h.races[+e.dataset.editRace];
+      fillRacePicker(false);
       raceForm.hidden = false; raceForm.index.value = e.dataset.editRace;
       raceForm.date.value = r.date; raceForm.name.value = r.name; raceForm.result.value = r.result || '';
       raceForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
