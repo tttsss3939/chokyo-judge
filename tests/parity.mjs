@@ -36,10 +36,10 @@ function diff(a, b, path = '') {
 }
 
 let failures = 0;
-let poolUsed = 0;
+const srcCount = {};
 function check(label, w, r, show, pool) {
   const py = runPython(w, r, pool), js = runJS(w, r, pool);
-  poolUsed += js.filter((j) => j.baseline && j.baseline.source === '全馬').length;
+  for (const j of js) if (j.baseline && j.baseline.source) srcCount[j.baseline.source] = (srcCount[j.baseline.source] || 0) + 1;
   const d = diff(py, js);
   if (d.length) { failures++; console.log(`✗ ${label}\n  ` + d.slice(0, 8).join('\n  ')); }
   if (show) for (const j of js) console.log(`  ${j.race.date} ${j.race.name.padEnd(14, '　')} ${j.status === '判定済' ? `${j.rank}${j.score}` : j.status}`);
@@ -108,5 +108,5 @@ try {
   }
 } finally { rmSync(dir, { recursive: true, force: true }); }
 
-console.log(`ランダム ${N} ケース: ${failures === 0 ? 'すべて一致' : `${failures} 件不一致`}（うち全馬基準を使った判定 ${poolUsed} 件）`);
+console.log(`ランダム ${N} ケース: ${failures === 0 ? 'すべて一致' : `${failures} 件不一致`}（基準の内訳: ${Object.entries(srcCount).map(([k, v]) => `${k} ${v}`).join('、')}）`);
 process.exit(failures ? 1 : 0);

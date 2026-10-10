@@ -25,6 +25,8 @@
     'ウッド': 'ウッド', 'ウッドチップ': 'ウッド', 'CW': 'ウッド', 'W': 'ウッド', 'D': 'ウッド',
     '南W': 'ウッド', '北W': 'ウッド', '栗CW': 'ウッド', '美W': 'ウッド',
   };
+  // 基準の優先順: 自己（過去レースの最終）→ 自己調教（普段の追い切りの速い方の半分）→ 全馬 → 汎用。training_judge.py と同じ
+  const SELF_WORK_MIN = 3, SELF_WORK_DAYS = [22, 365];
   const POOL_MIN = 3;   // 他の馬の最終追い切りがこの本数以上あれば汎用基準の代わりに使う
   const RANKS = [[70, 'S'], [60, 'A'], [45, 'B'], [-999, 'C']];
   const KEYS = ['f6', 'f5', 'f4', 'f3', 'f2', 'f1'];
@@ -146,7 +148,7 @@
     return slots;
   }
 
-  function buildBaseline(past, course, center, raceDay, pool) {
+  function buildBaseline(past, course, center, raceDay, pool, works) {
     const finals = past.filter((j) => j.slots['最終'] && j.slots['最終'].course === course).map((j) => j.slots['最終']);
     const vols = past.filter((j) => j.status === '判定済').map((j) => j.volume14d);
     if (finals.length >= 1) {
@@ -158,7 +160,20 @@
         n: finals.length, source: '自己',
       };
     }
-    // 自分の過去が無ければ、他の馬の最終追い切り（同トレセン・同コース、このレースより前）の平均
+    // 過去レースの登録が無ければ、自身の普段の追い切り（今回の調整より前）のうちラスト1Fが速い方の半分の平均
+    const [lo, hi] = SELF_WORK_DAYS;
+    let own = (works || []).filter((w) => w.isOikiri && w.course === course && w.f1 != null
+      && daysBetween(raceDay, w.date) >= lo && daysBetween(raceDay, w.date) <= hi);
+    if (own.length >= SELF_WORK_MIN) {
+      own = [...own].sort((a, b) => a.f1 - b.f1).slice(0, Math.max(SELF_WORK_MIN, Math.ceil(own.length / 2)));
+      return {
+        main: pyRound(exactMean(own.map((w) => w.main)), 1),
+        f1: pyRound(exactMean(own.map((w) => w.f1)), 2),
+        best_f1: Math.min(...own.map((w) => w.f1)),
+        volume: null, n: own.length, source: '自己調教',
+      };
+    }
+    // それも無ければ、他の馬の最終追い切り（同トレセン・同コース、このレースより前）の平均
     const peers = (pool || []).filter((p) => p.course === course && p.center === center && p.date < raceDay);
     if (peers.length >= POOL_MIN) {
       return {
@@ -194,7 +209,7 @@
 
       const ref = slots['最終'] || slots['1週前'] || ws[ws.length - 1];
       const course = ref.course;
-      const base = buildBaseline(results, course, ref.center, race.date, pool);   // このレースより前の情報だけ使う
+      const base = buildBaseline(results, course, ref.center, race.date, pool, works);   // このレースより前の情報だけ使う
       j.baseline = base;
       const interval = prev ? daysBetween(race.date, prev) : null;
       j.interval = interval;

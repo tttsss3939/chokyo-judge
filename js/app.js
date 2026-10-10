@@ -172,6 +172,7 @@
 
   function baseLabel(b) {
     if (b.source === '自己') return `自己（過去最終${b.n}本）`;
+    if (b.source === '自己調教') return `自己（普段の追い切りの速い方${b.n}本）`;
     if (b.source === '全馬') return `他の登録馬（最終${b.n}本の平均）`;
     return '汎用（固定値）';
   }

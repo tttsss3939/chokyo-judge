@@ -35,8 +35,14 @@ OIKIRI_RULES = {
     "坂路": ("f4", 58.0),
     "ウッド": ("f5", 72.0),
 }
-# 過去の最終追い切りが無い馬の基準: 他の馬の最終追い切り（同トレセン・同コース）が
-# POOL_MIN 本以上あればその平均、なければ固定の汎用基準
+# 基準の優先順:
+#   1. 自己   … 登録した過去レースの最終追い切り（同コース）の平均
+#   2. 自己調教 … 過去レースの登録が無くても、自身の追い切り（同コース、レース22〜365日前）が
+#                 SELF_WORK_MIN 本以上あれば、ラスト1Fが速い方の半分（最低 SELF_WORK_MIN 本）の平均
+#   3. 全馬   … 他の登録馬の最終追い切り（同トレセン・同コース）が POOL_MIN 本以上あればその平均
+#   4. 汎用   … 固定値
+SELF_WORK_MIN = 3
+SELF_WORK_DAYS = (22, 365)
 POOL_MIN = 3
 GENERIC_BASELINE = {
     "坂路": {"main": 53.5, "f1": 12.3},
@@ -223,7 +229,8 @@ def assign_slots(works: list[Workout], race_day: date) -> dict:
 
 
 def build_baseline(past: list[Judgement], course: str, center: str = "",
-                   race_day: Optional[date] = None, pool: Optional[list[PoolEntry]] = None) -> dict:
+                   race_day: Optional[date] = None, pool: Optional[list[PoolEntry]] = None,
+                   works: Optional[list[Workout]] = None) -> dict:
     finals = [j.slots["最終"] for j in past
               if "最終" in j.slots and j.slots["最終"].course == course]
     vols = [j.volume_14d for j in past if j.status == "判定済"]
@@ -234,6 +241,20 @@ def build_baseline(past: list[Judgement], course: str, center: str = "",
             "best_f1": min(f.f1 for f in finals),
             "volume": statistics.mean(vols) if vols else None,
             "n": len(finals), "source": "自己",
+        }
+    # 過去レースの登録が無ければ、自身の普段の追い切り（今回の調整より前）のうち
+    # ラスト1Fが速い方の半分の平均（最終追い切りは普段の追い切りより速いので、全体平均だと甘くなる）
+    lo, hi = SELF_WORK_DAYS
+    own = [w for w in (works or [])
+           if race_day is not None and w.is_oikiri and w.course == course and w.f1 is not None
+           and lo <= (race_day - w.day).days <= hi]
+    if len(own) >= SELF_WORK_MIN:
+        own = sorted(own, key=lambda w: w.f1)[:max(SELF_WORK_MIN, math.ceil(len(own) / 2))]
+        return {
+            "main": round(statistics.mean(w.main for w in own), 1),
+            "f1": round(statistics.mean(w.f1 for w in own), 2),
+            "best_f1": min(w.f1 for w in own),
+            "volume": None, "n": len(own), "source": "自己調教",
         }
     # 自分の過去が無ければ、他の馬の最終追い切り（同トレセン・同コース、このレースより前）の平均
     peers = [p for p in (pool or [])
@@ -265,7 +286,7 @@ def judge(works: list[Workout], races: list[Race], pool: Optional[list[PoolEntry
 
         ref = slots.get("最終") or slots.get("1週前") or ws[-1]
         course = ref.course
-        base = build_baseline(results, course, ref.center, race.day, pool)   # ← このレースより前の情報だけ使う
+        base = build_baseline(results, course, ref.center, race.day, pool, works)   # ← このレースより前の情報だけ使う
         j.baseline = base
         interval = (race.day - prev).days if prev else None
 
@@ -380,7 +401,8 @@ def report(horse: str, results: list[Judgement]) -> str:
             if k in j.slots:
                 lines.append(f"  {k:<4}: {j.slots[k].label()}")
         b = j.baseline
-        lines.append(f"  基準  : {b['source']}（過去最終{b['n']}本） 全体{b['main']} / ラスト1F {b['f1']}")
+        what = {"自己": "過去最終", "自己調教": "普段の追い切り上位", "全馬": "他の馬の最終"}.get(b["source"], "過去最終")
+        lines.append(f"  基準  : {b['source']}（{what}{b['n']}本） 全体{b['main']} / ラスト1F {b['f1']}")
         if j.status == "最終追い切り待ち":
             lines.append(f"  判定  : 最終追い切り待ち（直近14日 {j.volume_14d}本）")
             for n in j.notes:

@@ -144,7 +144,7 @@
   }
 
   function sourceNote(b, center, course) {
-    if (b.source === '汎用') return '※過去の最終追い切りがないため、汎用基準との比較';
+    if (b.source === '汎用') return `※この馬の比較材料が足りないため汎用基準と比較。レースの3週以上前の${course}追い切りが3本以上入るよう、過去の調教スクショも読み込むと自己基準になります`;
     if (b.source === '全馬') return `※自身の過去データがないため、他の登録馬（${center || ''}${course}の最終${b.n}本）の平均と比較`;
     return null;
   }
