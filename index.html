@@ -289,9 +289,6 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
 table.stats { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; background: var(--surface); }
 table.stats th, table.stats td { padding: 8px 2px; text-align: center; border-bottom: 1px solid var(--line); }
 table.stats th { font-size: 11px; color: var(--muted); font-weight: 700; }
-.import-main { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-.add-horse { padding: 0 10px; font-size: 15px; white-space: nowrap; }
-.import-main .btn.primary { font-size: 15px; white-space: nowrap; padding: 0 8px; min-width: 0; }
 .hint { font-size: 12px; color: var(--muted); margin: 8px 2px 0; }
 .add-dlg { padding: 10px; }
 .add-dlg h3 { margin: 0 0 12px; font-size: 17px; }
@@ -325,17 +322,11 @@ table.factor td.dim { color: var(--muted); }
   <section class="card backup-banner" id="backupBanner" hidden></section>
 
   <section class="card" id="importCard">
-    <div class="import-main">
-      <label class="btn primary big" for="fileInput">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/></svg>
-        スクショを読み込む
-      </label>
-      <button class="btn big add-horse" id="addHorseBtn" type="button">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-        馬を追加
-      </button>
-    </div>
-    <p class="hint">馬名はスクショから自動で読み取ります。JRA-VAN の調教タイム画面の<b>一番上（馬名が写った画面）</b>を1枚含めてください。</p>
+    <label class="btn primary big" for="fileInput">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/></svg>
+      スクショを読み込む
+    </label>
+    <p class="hint">新しい馬もここから。JRA-VAN の調教タイム画面の<b>一番上（馬名が写った画面）</b>を含めると、馬名を読み取って自動で登録します。</p>
     <input type="file" id="fileInput" accept="image/*" multiple hidden>
     <div class="row-btns">
       <button class="btn small" id="manualBtn">手入力で追加</button>

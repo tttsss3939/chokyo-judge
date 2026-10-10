@@ -398,7 +398,9 @@
       const k = order[i], prev = order[i - 1];
       if (row[k] != null && row[prev] != null && row.laps[k] != null &&
           Math.abs(row[k] - row[prev] - row.laps[k]) > 0.05) {
-        row.warnings.push(`${k.slice(1)}F: 累計と下段ラップ(${row.laps[k]})が不一致`);
+        // 下段ラップは括弧付きで誤読が多く、警告にすると誤報ばかりになるので表示はしない。
+        // 複数のスクショで同じ行が読めたときに、どちらを採用するかの判断にだけ使う
+        row.lapMismatch = (row.lapMismatch || 0) + 1;
       }
     }
     row.ok = row.warnings.length === 0;
@@ -433,7 +435,7 @@
    */
   function mergeRows(rowLists) {
     const map = new Map();
-    const badness = (x) => x.warnings.length + (x.clipped ? 0.5 : 0) + x.notes.length * 0.1;
+    const badness = (x) => x.warnings.length + (x.lapMismatch || 0) * 0.5 + (x.clipped ? 0.5 : 0) + x.notes.length * 0.1;
     for (const list of rowLists) {
       for (const r of list) {
         const key = `${r.date} ${r.time}`;

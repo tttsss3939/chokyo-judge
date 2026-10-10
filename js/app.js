@@ -865,7 +865,7 @@
     f.center.value = (horse() && horse().center) || '栗東';
     addDlg.showModal();
   }
-  $('#addHorseBtn').addEventListener('click', openAddHorse);
+
   $('#addByShot').addEventListener('click', () => {
     addDlg.close();
     importAsNew = true;
