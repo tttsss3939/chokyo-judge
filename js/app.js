@@ -997,12 +997,27 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
   }
 
+  // 版番号（index.html の app-version）。どの版が動いているかを画面で確認できるように
+  const ver = document.querySelector('meta[name="app-version"]');
+  if (ver) $('#appVersion').textContent = `版 ${ver.content}`;
   applyTheme();
   if (!state.current || !state.horses[state.current]) state.current = Object.keys(state.horses)[0] || null;
   render();
   renderBackupBanner();
   // オフライン対応（ホーム画面から電波なしでも起動・読み取りできるように）
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('service worker', e));
+    // updateViaCache: 'none' … sw.js 自体もHTTPキャッシュを使わずに更新を確認する
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+      // ホーム画面のアプリは閉じずに戻ってくることが多いので、表に出るたびに更新を確認
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch((e) => console.warn('service worker', e));
+    // 新しい版が有効になったら1回だけ再読み込みして、新しいコードに切り替える
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
   }
 })();

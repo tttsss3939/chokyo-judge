@@ -4,7 +4,8 @@
  *   - vendor/（Tesseract.js・OCRモデル、約13MB）: キャッシュ優先。中身は版ごとに固定なので一度取れば十分
  * vendor の中身を差し替えたら VENDOR_CACHE の版を上げる。
  */
-const APP_CACHE = 'chokyo-app-v1';
+// 版番号。更新したら index.html の app-version と合わせて上げる（sw.js が変わると端末側で更新が走る）
+const APP_CACHE = 'chokyo-app-2026.10.10-3';
 const VENDOR_CACHE = 'chokyo-vendor-tesseract-5.1.1';
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest',
@@ -19,7 +20,8 @@ const VENDOR_FILES = [
 
 self.addEventListener('install', (ev) => {
   ev.waitUntil((async () => {
-    await (await caches.open(APP_CACHE)).addAll(APP_FILES);
+    // reload: ブラウザのHTTPキャッシュ（GitHub Pages は10分）に残った古い版を拾わない
+    await (await caches.open(APP_CACHE)).addAll(APP_FILES.map((u) => new Request(u, { cache: 'reload' })));
     // OCR 一式は大きいので、失敗してもインストールは止めない（使ったときにキャッシュされる）
     try { await (await caches.open(VENDOR_CACHE)).addAll(VENDOR_FILES); } catch (e) { /* noop */ }
     await self.skipWaiting();
@@ -52,7 +54,8 @@ self.addEventListener('fetch', (ev) => {
   ev.respondWith((async () => {
     const cache = await caches.open(APP_CACHE);
     try {
-      const res = await fetch(req);
+      // no-cache: 端末に残っている古いファイルを使わず、必ずサーバーに更新を確認する
+      const res = await fetch(req, { cache: 'no-cache' });
       if (res.ok) cache.put(req, res.clone());
       return res;
     } catch (e) {
