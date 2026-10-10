@@ -27,7 +27,10 @@
   // 前処理・OCRの設定（テストページから上書きして比較できるように公開）
   const config = { targetW: 1600, lo: 80, hi: 195, psm: '11', detectName: true };
   const KEYS = ['f6', 'f5', 'f4', 'f3', 'f2', 'f1'];
-  const LAP_MIN = 10, LAP_MAX = 30;
+  // 1ハロンのラップとしてありうる範囲（ゆっくりしたキャンターは30秒を超える）と、
+  // 隣り合うラップの比の範囲（実データでは 0.9〜1.39。誤読するとここが大きく崩れる）
+  const LAP_MIN = 9.5, LAP_MAX = 45;
+  const LAP_RATIO_MIN = 0.7, LAP_RATIO_MAX = 1.65;
 
   // ------------------------------------------------------------ 前処理 ----
   function loadScript(src) {
@@ -392,6 +395,25 @@
       }
     }
     row.course = row.f5 != null || row.f6 != null ? 'ウッド' : '坂路';
+    // おかしな行は、下段ラップを使って1か所だけ直すと全部のチェックが通るなら自動で直す
+    //   f(k) = f(k-1) + lap(k)   /   f(k) = f(k+1) - lap(k+1)
+    if (validateRow(row).length) {
+      fix: for (let i = 0; i < order.length; i++) {
+        const k = order[i];
+        if (row[k] == null) continue;
+        const cands = [];
+        if (i > 0 && row[order[i - 1]] != null && row.laps[k] != null) cands.push(r1(row[order[i - 1]] + row.laps[k]));
+        const up = order[i + 1];
+        if (up && row[up] != null && row.laps[up] != null) cands.push(r1(row[up] - row.laps[up]));
+        for (const v of cands) {
+          if (v === row[k] || !(v > 0)) continue;
+          const old = row[k];
+          row[k] = v;
+          if (!validateRow(row).length) { row.notes.push(`${k.slice(1)}F ${old.toFixed(1)}→${v.toFixed(1)}（下段ラップから補正）`); break fix; }
+          row[k] = old;
+        }
+      }
+    }
     row.warnings.push(...validateRow(row));
     // 下段ラップとの整合（読めたものだけ）
     for (let i = 1; i < order.length; i++) {
@@ -411,20 +433,30 @@
     const warn = [];
     if (!row.date) warn.push('日付なし');
     for (const k of ['f4', 'f3', 'f2', 'f1']) if (row[k] == null) warn.push(`${k.slice(1)}Fが空`);
-    if (row.course === 'ウッド' && row.f5 == null) warn.push('ウッドなのに5Fが空');
+    // （ゆっくりしたウッドのキャンターは 5F/6F が「-」なので、ウッドで 5F 空欄は警告しない）
     const present = KEYS.filter((k) => row[k] != null);
     for (let i = 0; i < present.length - 1; i++) {
       const a = present[i], b = present[i + 1];
       if (!(row[a] > row[b])) warn.push(`${a.slice(1)}F ≤ ${b.slice(1)}F`);
     }
-    // 隣り合う区間のラップ
-    for (let i = 0; i < KEYS.length - 1; i++) {
+    // 1ハロンごとのラップ（6F→1F の順。最後は 1F そのもの）
+    const laps = [];
+    for (let i = 0; i < KEYS.length; i++) {
       const a = KEYS[i], b = KEYS[i + 1];
-      if (row[a] == null || row[b] == null) continue;
-      const lap = r1(row[a] - row[b]);
-      if (lap < LAP_MIN || lap > LAP_MAX) warn.push(`${a.slice(1)}F区間ラップ ${lap}秒`);
+      if (row[a] == null) continue;
+      if (b && row[b] == null) continue;
+      laps.push({ key: a, lap: b ? r1(row[a] - row[b]) : row[a] });
     }
-    if (row.f1 != null && (row.f1 < LAP_MIN || row.f1 > LAP_MAX)) warn.push(`1F ${row.f1}秒`);
+    for (const { key, lap } of laps) {
+      if (lap < LAP_MIN || lap > LAP_MAX) warn.push(key === 'f1' ? `1F ${lap}秒` : `${key.slice(1)}F区間ラップ ${lap}秒`);
+    }
+    // 隣り合うラップが急に変わるのは読み間違い（例: 1F 29.0 を 20.0 と読むと 29.5→38.5→20.0 になる）
+    for (let i = 0; i < laps.length - 1; i++) {
+      const x = laps[i], y = laps[i + 1];
+      if (x.lap < LAP_MIN || y.lap < LAP_MIN) continue;
+      const ratio = x.lap / y.lap;
+      if (ratio < LAP_RATIO_MIN || ratio > LAP_RATIO_MAX) warn.push(`${y.key.slice(1)}F付近のラップが不自然（${x.lap}→${y.lap}）`);
+    }
     return warn;
   }
 
@@ -457,5 +489,5 @@
     return out;
   }
 
-  return { config, recognizeFile, pickHorseName, parseWords, parseDate, parseNumber, validateRow, mergeRows, preprocess, getWorker, KEYS };
+  return { config, recognizeFile, pickHorseName, finalizeRow, parseWords, parseDate, parseNumber, validateRow, mergeRows, preprocess, getWorker, KEYS };
 });
