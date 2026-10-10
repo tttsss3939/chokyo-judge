@@ -73,11 +73,9 @@
   }
   function ensureHorse() {
     if (horse()) return horse();
-    const name = prompt('馬名を入力してください');
-    if (!name || !name.trim()) return null;
-    const h = newHorse(name.trim());
-    save(); render();
-    return h;
+    openAddHorse();
+    toast('先に馬を追加してください');
+    return null;
   }
   const sortWorkouts = (ws) => ws.sort((a, b) => (a.date === b.date ? (a.time < b.time ? 1 : a.time > b.time ? -1 : 0) : a.date < b.date ? 1 : -1));
   const sortRaces = (rs) => rs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -112,7 +110,7 @@
   function renderSummary(h, results) {
     const el = $('#summaryCard');
     if (!h) {
-      el.innerHTML = `<h2>判定サマリー</h2><p class="empty">まず馬を登録し、JRA-VAN の「調教タイム」画面のスクショを読み込んでください。<br>メニュー（…）の「サンプル2頭を読み込む」で動作を試せます。</p>`;
+      el.innerHTML = `<h2>判定サマリー</h2><p class="empty">「スクショを読み込む」で JRA-VAN の調教タイム画面を選ぶと、馬名を読み取って馬が自動で登録されます（「馬を追加」から名前で登録することもできます）。<br>メニュー（…）の「サンプル2頭を読み込む」で動作を試せます。</p>`;
       return;
     }
     if (!results.length) {
@@ -475,9 +473,11 @@
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { const h = horse(); if (h) renderChart(h, judgeHorse(state.current)); }, 150); });
 
   // ------------------------------------------------------ スクショ取り込み ----
+  let importAsNew = false;   // 「馬を追加 → スクショから追加」で開いたとき
   $('#fileInput').addEventListener('change', async (ev) => {
     const files = [...ev.target.files];
     ev.target.value = '';
+    const asNew = importAsNew; importAsNew = false;
     if (!files.length) return;
     const prog = $('#progress'), text = $('#progressText'), bar = $('#progressBar');
     prog.hidden = false;
@@ -506,7 +506,7 @@
     const merged = ChokyoOCR.mergeRows(lists);
     if (!merged.length) { toast('調教の行が見つかりませんでした。JRA-VAN の調教タイム画面のスクショか確認してください'); return; }
     const detected = names.length ? names.sort((a, b) => names.filter((x) => x === b).length - names.filter((x) => x === a).length)[0] : null;
-    openConfirm(merged.map(fromOcrRow), `${files.length}枚から${merged.length}行を読み取りました${detected ? `・馬名「${detected}」を検出` : ''}`, detected);
+    openConfirm(merged.map(fromOcrRow), `${files.length}枚から${merged.length}行を読み取りました${detected ? `・馬名「${detected}」を検出` : ''}`, detected, asNew);
   });
 
   function snippet(img, r) {
@@ -578,7 +578,7 @@
     return KEYS.every((k) => ex[k] === out[k]) && ex.course === out.course ? 'same' : 'upd';
   }
 
-  function openConfirm(rows, sub, detectedName) {
+  function openConfirm(rows, sub, detectedName, asNew) {
     cfRows = rows;
     const sel = $('#cfHorse');
     const ids = Object.keys(state.horses);
@@ -587,7 +587,9 @@
     if (detectedName && !hit) opts += `<option value="new:${esc(detectedName)}">＋ 新規: ${esc(detectedName)}</option>`;
     opts += '<option value="new:">＋ 新しい馬…</option>';
     sel.innerHTML = opts;
-    sel.value = hit || (detectedName ? `new:${detectedName}` : state.current && state.horses[state.current] ? state.current : 'new:');
+    sel.value = hit || (detectedName ? `new:${detectedName}` : !asNew && state.current && state.horses[state.current] ? state.current : 'new:');
+    $('#cfNewName').value = '';
+    updateNewNameField();
     const h = targetHorse() || horse();
     $('#cfCenter').value = (h && h.center) || '栗東';
     $('#cfSub').textContent = sub || '';
@@ -670,7 +672,14 @@
     $('#cfSave').textContent = `保存（${active.length}行）`;
   }
 
+  /** 保存先が「新しい馬」で名前が未定のときだけ、その場で入力欄を出す（prompt を使わない） */
+  function updateNewNameField() {
+    const show = $('#cfHorse').value === 'new:';
+    $('#cfNewName').hidden = !show;
+  }
   $('#cfHorse').addEventListener('change', () => {
+    updateNewNameField();
+    if (!$('#cfNewName').hidden) $('#cfNewName').focus();
     const h = targetHorse(); if (h && h.center) $('#cfCenter').value = h.center;
     [...$('#cfBody').children].forEach((el, i) => updateCfRow(el, cfRows[i]));
   });
@@ -695,8 +704,12 @@
     const sv = $('#cfHorse').value;
     if (!h) {
       let name = sv.startsWith('new:') ? sv.slice(4) : '';
-      if (!name) name = (prompt('馬名を入力してください') || '').trim();
-      if (!name) return;
+      if (!name) name = $('#cfNewName').value.trim();
+      if (!name) {
+        $('#cfNewName').hidden = false; $('#cfNewName').focus();
+        toast('馬名が読み取れなかったので、保存先の横に馬名を入力してください');
+        return;
+      }
       const id = findHorseByName(name);
       if (id) { h = state.horses[id]; state.current = id; } else h = newHorse(name);
     } else {
@@ -844,11 +857,36 @@
     h.workouts.splice(+b.dataset.delWk, 1); save(); render();
   });
 
+  // ------------------------------------------------------------ 馬を追加 ----
+  const addDlg = $('#addHorseDlg');
+  function openAddHorse() {
+    const f = $('#addByName');
+    f.reset();
+    f.center.value = (horse() && horse().center) || '栗東';
+    addDlg.showModal();
+  }
+  $('#addHorseBtn').addEventListener('click', openAddHorse);
+  $('#addByShot').addEventListener('click', () => {
+    addDlg.close();
+    importAsNew = true;
+    $('#fileInput').click();
+  });
+  $('#addByName').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const f = ev.target, name = f.name.value.trim();
+    if (!name) return;
+    const id = findHorseByName(name);
+    if (id) { state.current = id; toast(`${state.horses[id].name} はすでに登録済みです`); }
+    else newHorse(name, f.center.value);
+    save(); addDlg.close(); render();
+  });
+  $('#addCancel').addEventListener('click', () => addDlg.close());
+  addDlg.addEventListener('click', (ev) => { if (ev.target === addDlg) addDlg.close(); });
+
   // ---------------------------------------------------------- 馬・メニュー ----
   $('#horseSelect').addEventListener('change', (ev) => {
     if (ev.target.value === '__new') {
-      const name = prompt('馬名を入力してください');
-      if (name && name.trim()) { newHorse(name.trim()); save(); }
+      openAddHorse();
     } else if (ev.target.value) { state.current = ev.target.value; save(); }
     raceForm.hidden = true;
     render();
@@ -861,7 +899,7 @@
     if (act !== 'theme') menu.close();
     const h = horse();
     switch (act) {
-      case 'newHorse': { const n = prompt('馬名を入力してください'); if (n && n.trim()) { newHorse(n.trim()); save(); render(); } break; }
+      case 'newHorse': openAddHorse(); break;
       case 'renameHorse': { if (!h) break; const n = prompt('新しい馬名', h.name); if (n && n.trim()) { h.name = n.trim(); save(); render(); } break; }
       case 'deleteHorse': {
         if (!h || !confirm(`${h.name} のデータ（調教${h.workouts.length}件・レース${h.races.length}件）を削除しますか？`)) break;
