@@ -35,7 +35,9 @@ OIKIRI_RULES = {
     "坂路": ("f4", 58.0),
     "ウッド": ("f5", 72.0),
 }
-# 過去の最終追い切りが無い馬に使う汎用基準
+# 過去の最終追い切りが無い馬の基準: 他の馬の最終追い切り（同トレセン・同コース）が
+# POOL_MIN 本以上あればその平均、なければ固定の汎用基準
+POOL_MIN = 3
 GENERIC_BASELINE = {
     "坂路": {"main": 53.5, "f1": 12.3},
     "ウッド": {"main": 67.0, "f1": 11.6},
@@ -117,6 +119,16 @@ class Race:
 
 
 @dataclass
+class PoolEntry:
+    """他の馬の最終追い切り（汎用基準の代わりに使う）。day = 追い切りの日"""
+    day: date
+    center: str
+    course: str
+    main: float
+    f1: float
+
+
+@dataclass
 class Judgement:
     race: Race
     status: str                     # 判定済 / 最終追い切り待ち / データ不足
@@ -145,7 +157,7 @@ def _course(raw: str) -> str:
 
 def load_workouts_csv(path: str) -> list[Workout]:
     out = []
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             out.append(Workout(
                 day=datetime.strptime(r["date"], "%Y-%m-%d").date(),
@@ -180,10 +192,18 @@ def parse_jravan_text(text: str) -> list[Workout]:
 
 
 def load_races_csv(path: str) -> list[Race]:
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         races = [Race(datetime.strptime(r["date"], "%Y-%m-%d").date(), r["name"],
                       r.get("result", "") or "") for r in csv.DictReader(f)]
     return sorted(races, key=lambda r: r.day)
+
+
+def load_pool_csv(path: str) -> list[PoolEntry]:
+    """他の馬の最終追い切り CSV: date,center,course,main,f1（アプリの「全馬の最終追い切りCSV」と同じ形式）"""
+    with open(path, encoding="utf-8-sig") as f:
+        return [PoolEntry(datetime.strptime(r["date"], "%Y-%m-%d").date(), r.get("center", ""),
+                          _course(r["course"]), float(r["main"]), float(r["f1"]))
+                for r in csv.DictReader(f)]
 
 
 # -------------------------------------------------------------- ロジック ----
@@ -202,7 +222,8 @@ def assign_slots(works: list[Workout], race_day: date) -> dict:
     return slots
 
 
-def build_baseline(past: list[Judgement], course: str) -> dict:
+def build_baseline(past: list[Judgement], course: str, center: str = "",
+                   race_day: Optional[date] = None, pool: Optional[list[PoolEntry]] = None) -> dict:
     finals = [j.slots["最終"] for j in past
               if "最終" in j.slots and j.slots["最終"].course == course]
     vols = [j.volume_14d for j in past if j.status == "判定済"]
@@ -214,11 +235,21 @@ def build_baseline(past: list[Judgement], course: str) -> dict:
             "volume": statistics.mean(vols) if vols else None,
             "n": len(finals), "source": "自己",
         }
+    # 自分の過去が無ければ、他の馬の最終追い切り（同トレセン・同コース、このレースより前）の平均
+    peers = [p for p in (pool or [])
+             if p.course == course and p.center == center and race_day is not None and p.day < race_day]
+    if len(peers) >= POOL_MIN:
+        return {
+            "main": round(statistics.mean(p.main for p in peers), 1),
+            "f1": round(statistics.mean(p.f1 for p in peers), 2),
+            "best_f1": min(p.f1 for p in peers),
+            "volume": None, "n": len(peers), "source": "全馬",
+        }
     g = GENERIC_BASELINE.get(course, GENERIC_BASELINE["坂路"])
     return {**g, "best_f1": g["f1"], "volume": None, "n": 0, "source": "汎用"}
 
 
-def judge(works: list[Workout], races: list[Race]) -> list[Judgement]:
+def judge(works: list[Workout], races: list[Race], pool: Optional[list[PoolEntry]] = None) -> list[Judgement]:
     results: list[Judgement] = []
     for i, race in enumerate(races):
         prev = races[i - 1].day if i > 0 else None
@@ -232,8 +263,9 @@ def judge(works: list[Workout], races: list[Race]) -> list[Judgement]:
             results.append(j)
             continue
 
-        course = (slots.get("最終") or slots.get("1週前") or ws[-1]).course
-        base = build_baseline(results, course)   # ← このレースより前の情報だけ使う
+        ref = slots.get("最終") or slots.get("1週前") or ws[-1]
+        course = ref.course
+        base = build_baseline(results, course, ref.center, race.day, pool)   # ← このレースより前の情報だけ使う
         j.baseline = base
         interval = (race.day - prev).days if prev else None
 
@@ -370,6 +402,7 @@ def main():
     ap.add_argument("--workouts", default="data/aisansan_training.csv")
     ap.add_argument("--text", help="JRA-VANからコピペした調教テキスト（CSVの代わり）")
     ap.add_argument("--races", default="data/aisansan_races.csv")
+    ap.add_argument("--pool", help="他の馬の最終追い切りCSV（date,center,course,main,f1）。自分の過去が無いときの基準に使う")
     ap.add_argument("--json", action="store_true", help="判定結果を JSON で出力（JS版との一致テスト用）")
     a = ap.parse_args()
 
@@ -379,7 +412,8 @@ def main():
     else:
         works = load_workouts_csv(a.workouts)
     races = load_races_csv(a.races)
-    results = judge(works, races)
+    pool = load_pool_csv(a.pool) if a.pool else None
+    results = judge(works, races, pool)
     if a.json:
         print(json.dumps([to_dict(j) for j in results], ensure_ascii=False, indent=1))
     else:

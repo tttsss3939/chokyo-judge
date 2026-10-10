@@ -19,7 +19,11 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+  // Tesseract.js 一式は vendor/tesseract に同梱（オフラインでも動くように。CDN には取りに行かない）
+  // ocr.js（js/ 直下）の位置から求める。tests/ のページから読んでも同じ場所を指すように
+  const VENDOR = typeof document !== 'undefined' && document.currentScript ? new URL('../vendor/tesseract/', document.currentScript.src).href : '';
+  const TESSERACT_URL = VENDOR + 'tesseract.min.js';
+  const WORKER_OPTS = { workerPath: VENDOR + 'worker.min.js', corePath: VENDOR, langPath: VENDOR + 'lang', workerBlobURL: false };
   // 前処理・OCRの設定（テストページから上書きして比較できるように公開）
   const config = { targetW: 1600, lo: 80, hi: 195, psm: '11', detectName: true };
   const KEYS = ['f6', 'f5', 'f4', 'f3', 'f2', 'f1'];
@@ -121,6 +125,7 @@
       workerPromise = (async () => {
         if (typeof Tesseract === 'undefined') await loadScript(TESSERACT_URL);
         const worker = await Tesseract.createWorker('eng', 1, {
+          ...WORKER_OPTS,
           logger: (m) => onProgress && onProgress({ phase: m.status, progress: m.progress }),
         });
         await worker.setParameters({
@@ -171,7 +176,7 @@
     if (!jpnPromise) {
       jpnPromise = (async () => {
         if (typeof Tesseract === 'undefined') await loadScript(TESSERACT_URL);
-        const w = await Tesseract.createWorker('jpn', 1);
+        const w = await Tesseract.createWorker('jpn', 1, WORKER_OPTS);
         await w.setParameters({ tessedit_pageseg_mode: '11' });
         return w;
       })().catch((e) => { jpnPromise = null; throw e; });

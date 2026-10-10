@@ -289,6 +289,14 @@ dialog.menu { border-radius: 16px; width: min(92vw, 420px); padding: 8px; backgr
 table.stats { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; background: var(--surface); }
 table.stats th, table.stats td { padding: 8px 2px; text-align: center; border-bottom: 1px solid var(--line); }
 table.stats th { font-size: 11px; color: var(--muted); font-weight: 700; }
+.backup-banner { display: flex; gap: 10px; align-items: center; background: var(--warn-bg); border-color: var(--warn); }
+.backup-banner[hidden] { display: none; }
+.backup-banner > div { flex: 1; font-size: 14px; }
+.backup-banner .sub { font-size: 12px; color: var(--muted); }
+table.factor td { font-size: 14px; }
+table.factor td small { display: block; font-size: 11px; color: var(--muted); }
+table.factor th:first-child { text-align: left; font-size: 12px; color: var(--text); }
+table.factor td.dim { color: var(--muted); }
 .warnbox { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
 #statsBody h4 { font-size: 13px; color: var(--muted); margin: 16px 0 4px; }
 .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 100; max-width: calc(100vw - 32px); }
@@ -305,6 +313,8 @@ table.stats th { font-size: 11px; color: var(--muted); font-weight: 700; }
 </header>
 
 <main>
+  <section class="card backup-banner" id="backupBanner" hidden></section>
+
   <section class="card" id="importCard">
     <label class="btn primary big" for="fileInput">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/></svg>
@@ -392,7 +402,8 @@ table.stats th { font-size: 11px; color: var(--muted); font-weight: 700; }
     <hr>
     <button data-act="exportWorkouts">調教CSVを書き出し（Python版用）</button>
     <button data-act="exportRaces">レースCSVを書き出し（Python版用）</button>
-    <button data-act="exportAll">全データをバックアップ（JSON）</button>
+    <button data-act="exportPool">他の馬の最終追い切りCSV（Python版 --pool 用）</button>
+    <button data-act="exportAll">全データをバックアップ（共有・ファイルに保存）</button>
     <button data-act="importAll">バックアップから復元（JSON）</button>
     <button data-act="stats">成績の検証（ランクと着順）</button>
     <hr>

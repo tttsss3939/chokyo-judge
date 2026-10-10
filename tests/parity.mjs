@@ -12,17 +12,18 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const Judge = createRequire(import.meta.url)(join(root, 'js', 'judge.js'));
 const PY = process.env.PYTHON || 'python';
 
-function runPython(workoutsPath, racesPath) {
+function runPython(workoutsPath, racesPath, poolPath) {
   const out = execFileSync(PY, ['-I', '-X', 'utf8', join(root, 'training_judge.py'), '--json',
-    '--workouts', workoutsPath, '--races', racesPath], { encoding: 'utf8' });
+    '--workouts', workoutsPath, '--races', racesPath, ...(poolPath ? ['--pool', poolPath] : [])], { encoding: 'utf8' });
   return JSON.parse(out);
 }
 
-function runJS(workoutsPath, racesPath) {
+function runJS(workoutsPath, racesPath, poolPath) {
   const works = Judge.workoutsFromCSV(readFileSync(workoutsPath, 'utf8'));
   const races = Judge.racesFromCSV(readFileSync(racesPath, 'utf8'));
+  const pool = poolPath ? Judge.poolFromCSV(readFileSync(poolPath, 'utf8')) : [];
   // JSON を通して Python 側と同じ表現（数値・null）にそろえる
-  return JSON.parse(JSON.stringify(Judge.toComparable(Judge.judge(works, races))));
+  return JSON.parse(JSON.stringify(Judge.toComparable(Judge.judge(works, races, pool))));
 }
 
 function diff(a, b, path = '') {
@@ -35,8 +36,10 @@ function diff(a, b, path = '') {
 }
 
 let failures = 0;
-function check(label, w, r, show) {
-  const py = runPython(w, r), js = runJS(w, r);
+let poolUsed = 0;
+function check(label, w, r, show, pool) {
+  const py = runPython(w, r, pool), js = runJS(w, r, pool);
+  poolUsed += js.filter((j) => j.baseline && j.baseline.source === '全馬').length;
   const d = diff(py, js);
   if (d.length) { failures++; console.log(`✗ ${label}\n  ` + d.slice(0, 8).join('\n  ')); }
   if (show) for (const j of js) console.log(`  ${j.race.date} ${j.race.name.padEnd(14, '　')} ${j.status === '判定済' ? `${j.rank}${j.score}` : j.status}`);
@@ -63,6 +66,7 @@ try {
     const start = 20000 + Math.floor(rnd() * 400);
     const span = 60 + Math.floor(rnd() * 300);
     const rows = [];
+    const center = pick(['栗東', '美浦']);
     for (let d = start; d < start + span; d++) {
       if (rnd() < 0.45) continue;
       const reps = rnd() < 0.08 ? 2 : 1;
@@ -75,7 +79,7 @@ try {
         const wood = course !== '坂路';
         const v = { f1: t1(cum[0]), f2: rnd() < 0.03 ? '' : t1(cum[1]), f3: t1(cum[2]), f4: t1(cum[3]),
           f5: wood ? t1(cum[4]) : '', f6: wood ? t1(cum[5]) : '' };
-        rows.push([iso(d), `0${5 + r}:${String(Math.floor(rnd() * 60)).padStart(2, '0')}`, '栗東', course, v.f6, v.f5, v.f4, v.f3, v.f2, v.f1].join(','));
+        rows.push([iso(d), `0${5 + r}:${String(Math.floor(rnd() * 60)).padStart(2, '0')}`, center, course, v.f6, v.f5, v.f4, v.f3, v.f2, v.f1].join(','));
       }
     }
     rows.reverse();
@@ -86,9 +90,23 @@ try {
     const w = join(dir, 'w.csv'), r = join(dir, 'r.csv');
     writeFileSync(w, 'date,time,center,course,f6,f5,f4,f3,f2,f1\n' + rows.join('\n') + '\n');
     writeFileSync(r, 'date,name,result\n' + raceRows.join('\n') + '\n');
-    check(`random #${c}`, w, r, false);
+    // 他の馬の最終追い切り（半分のケースで付ける。トレセン・コース違いも混ぜる）
+    let pool = null;
+    if (rnd() < 0.6) {
+      const n = Math.floor(rnd() * 12);
+      const prow = [];
+      for (let k = 0; k < n; k++) {
+        const course = pick(['坂路', 'ウッド', 'CW']);
+        const wood = course !== '坂路';
+        prow.push([iso(start - 60 + Math.floor(rnd() * (span + 60))), pick([center, center, '美浦', '栗東']), course,
+          t1(wood ? 64 + rnd() * 6 : 50 + rnd() * 6), t1(10.9 + rnd() * 1.8)].join(','));
+      }
+      pool = join(dir, 'p.csv');
+      writeFileSync(pool, 'date,center,course,main,f1\n' + prow.join('\n') + (prow.length ? '\n' : ''));
+    }
+    check(`random #${c}`, w, r, false, pool);
   }
 } finally { rmSync(dir, { recursive: true, force: true }); }
 
-console.log(`ランダム ${N} ケース: ${failures === 0 ? 'すべて一致' : `${failures} 件不一致`}`);
+console.log(`ランダム ${N} ケース: ${failures === 0 ? 'すべて一致' : `${failures} 件不一致`}（うち全馬基準を使った判定 ${poolUsed} 件）`);
 process.exit(failures ? 1 : 0);

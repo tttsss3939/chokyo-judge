@@ -25,6 +25,7 @@
     'ウッド': 'ウッド', 'ウッドチップ': 'ウッド', 'CW': 'ウッド', 'W': 'ウッド', 'D': 'ウッド',
     '南W': 'ウッド', '北W': 'ウッド', '栗CW': 'ウッド', '美W': 'ウッド',
   };
+  const POOL_MIN = 3;   // 他の馬の最終追い切りがこの本数以上あれば汎用基準の代わりに使う
   const RANKS = [[70, 'S'], [60, 'A'], [45, 'B'], [-999, 'C']];
   const KEYS = ['f6', 'f5', 'f4', 'f3', 'f2', 'f1'];
   const SHAPE_POINTS = { '加速': 8, '維持': 0, '減速': -6, '大きく減速': -12 };
@@ -145,7 +146,7 @@
     return slots;
   }
 
-  function buildBaseline(past, course) {
+  function buildBaseline(past, course, center, raceDay, pool) {
     const finals = past.filter((j) => j.slots['最終'] && j.slots['最終'].course === course).map((j) => j.slots['最終']);
     const vols = past.filter((j) => j.status === '判定済').map((j) => j.volume14d);
     if (finals.length >= 1) {
@@ -157,6 +158,16 @@
         n: finals.length, source: '自己',
       };
     }
+    // 自分の過去が無ければ、他の馬の最終追い切り（同トレセン・同コース、このレースより前）の平均
+    const peers = (pool || []).filter((p) => p.course === course && p.center === center && p.date < raceDay);
+    if (peers.length >= POOL_MIN) {
+      return {
+        main: pyRound(exactMean(peers.map((p) => p.main)), 1),
+        f1: pyRound(exactMean(peers.map((p) => p.f1)), 2),
+        best_f1: Math.min(...peers.map((p) => p.f1)),
+        volume: null, n: peers.length, source: '全馬',
+      };
+    }
     const g = GENERIC_BASELINE[course] || GENERIC_BASELINE['坂路'];
     return { ...g, best_f1: g.f1, volume: null, n: 0, source: '汎用' };
   }
@@ -164,9 +175,11 @@
   /**
    * works: [{date:'YYYY-MM-DD', time, center, course, f6..f1}]
    * races: [{date, name, result}]
+   * pool:  他の馬の最終追い切り [{date(追い切り日), center, course, main, f1}]（省略可）
    * 戻り値: レースごとの判定（古い順）
    */
-  function judge(worksIn, racesIn) {
+  function judge(worksIn, racesIn, poolIn) {
+    const pool = (poolIn || []).map((p) => ({ ...p, course: normCourse(p.course), center: p.center || '' }));
     const works = worksIn.map(makeWorkout).sort(byDate);   // 安定ソート（同日は入力順）
     const races = racesIn.map((r) => ({ date: r.date, name: r.name, result: r.result || '' })).sort(byDate);
     const results = [];
@@ -179,8 +192,9 @@
 
       if (!ws.length) { j.status = 'データ不足'; results.push(j); return; }
 
-      const course = (slots['最終'] || slots['1週前'] || ws[ws.length - 1]).course;
-      const base = buildBaseline(results, course);   // このレースより前の情報だけ使う
+      const ref = slots['最終'] || slots['1週前'] || ws[ws.length - 1];
+      const course = ref.course;
+      const base = buildBaseline(results, course, ref.center, race.date, pool);   // このレースより前の情報だけ使う
       j.baseline = base;
       const interval = prev ? daysBetween(race.date, prev) : null;
       j.interval = interval;
@@ -303,8 +317,24 @@
     return ['date,name,result', ...races.map((r) => [r.date, r.name, r.result || ''].join(','))].join('\n') + '\n';
   }
 
+  /** 判定結果から、プール用の最終追い切り一覧を作る */
+  function finalsOf(results) {
+    return results.filter((j) => j.slots['最終']).map((j) => {
+      const f = j.slots['最終'];
+      return { date: f.date, center: f.center, course: f.course, main: f.main, f1: f.f1 };
+    });
+  }
+
+  function poolToCSV(pool) {
+    return ['date,center,course,main,f1', ...pool.map((p) => [p.date, p.center, p.course, p.main.toFixed(1), p.f1.toFixed(1)].join(','))].join('\n') + '\n';
+  }
+
+  function poolFromCSV(text) {
+    return parseCSV(text).map((r) => ({ date: r.date, center: r.center || '', course: normCourse(r.course), main: parseFloat(r.main), f1: parseFloat(r.f1) }));
+  }
+
   return {
-    OIKIRI_RULES, GENERIC_BASELINE, RANKS, KEYS,
+    OIKIRI_RULES, POOL_MIN, finalsOf, poolToCSV, poolFromCSV, GENERIC_BASELINE, RANKS, KEYS,
     judge, pendingCriteria, toComparable, makeWorkout, normCourse,
     parseCSV, workoutsFromCSV, racesFromCSV, workoutsToCSV, racesToCSV,
     pyRound, pyStr, pyFmt, exactMean, scoreRound, daysBetween,

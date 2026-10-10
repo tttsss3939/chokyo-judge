@@ -21,10 +21,49 @@
     } catch (e) { /* 読めなければ新規 */ }
     return { version: 1, current: null, horses: {} };
   }
+  // データ（馬・調教・レース）が変わったら、バックアップ未済の印（dirtyAt）を付ける
+  let lastHorsesJSON = JSON.stringify(state.horses);
   function save() {
+    const hj = JSON.stringify(state.horses);
+    if (hj !== lastHorsesJSON) { lastHorsesJSON = hj; if (!state.dirtyAt) state.dirtyAt = Date.now(); }
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
     catch (e) { toast('保存できませんでした（プライベートブラウズ／容量不足？）'); }
+    renderBackupBanner();
   }
+
+  // ---------------------------------------------------------- バックアップ ----
+  const BACKUP_REMIND_DAYS = 7;
+  function renderBackupBanner() {
+    const el = $('#backupBanner'); if (!el) return;
+    const has = Object.values(state.horses).some((h) => h.workouts.length || h.races.length);
+    const days = state.dirtyAt ? Math.floor((Date.now() - state.dirtyAt) / 86400000) : 0;
+    if (!has || !state.dirtyAt || days < BACKUP_REMIND_DAYS) { el.hidden = true; return; }
+    const last = state.lastBackup ? `最後のバックアップは${Math.floor((Date.now() - state.lastBackup) / 86400000)}日前` : 'まだバックアップしていません';
+    el.hidden = false;
+    el.innerHTML = `<div><b>データのバックアップ</b><div class="sub">${last}。データはこのiPhoneの中にしかありません。</div></div>
+      <button class="btn small primary" type="button" data-backup>バックアップ</button>`;
+  }
+
+  async function backup() {
+    const name = `chokyo-judge-backup-${todayISO()}.json`;
+    const text = JSON.stringify({ ...state, dirtyAt: undefined }, null, 1);
+    const file = typeof File === 'function' ? new File([text], name, { type: 'application/json' }) : null;
+    // iPhone では共有シートから「ファイルに保存」や LINE・メールに送れる
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: '調教ジャッジのバックアップ' });
+      } catch (e) {
+        if (e && e.name === 'AbortError') return;   // キャンセル
+        download(name, text, 'application/json');
+      }
+    } else {
+      download(name, text, 'application/json');
+    }
+    state.lastBackup = Date.now(); state.dirtyAt = null;
+    save();
+    toast('バックアップしました');
+  }
+  document.addEventListener('click', (ev) => { if (ev.target.closest('[data-backup]')) backup(); });
   const horse = () => state.horses[state.current] || null;
   function newHorse(name, center) {
     const id = 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -47,7 +86,7 @@
   function render() {
     renderHorseSelect();
     const h = horse();
-    const results = h ? Judge.judge(h.workouts, h.races) : [];
+    const results = h ? judgeHorse(state.current) : [];
     renderSummary(h, results);
     renderCompare(h, results);
     renderRaceList(h);
@@ -93,7 +132,7 @@
       badge = `<div class="rank-badge pending"><div><b>最終<br>待ち</b></div></div>`;
       const c = Judge.pendingCriteria(j).map((s) => s.split(':').map((x) => x.trim()));
       const cls = ['up', 'keep', 'down'];
-      body = `<div class="meta">基準: ${esc(j.baseline.source)}（過去最終${j.baseline.n}本）全体 ${Judge.pyStr(j.baseline.main)} / ラスト1F ${Judge.pyStr(j.baseline.f1)}</div>`;
+      body = `<div class="meta">基準: ${baseLabel(j.baseline)}全体 ${Judge.pyStr(j.baseline.main)} / ラスト1F ${Judge.pyStr(j.baseline.f1)}</div>`;
       body += `<ul class="criteria num">${c.map(([k, v], i) => `<li class="${cls[i]}"><b>${esc(k)}</b><span>${esc(v)}</span></li>`).join('')}</ul>`;
     } else {
       badge = `<div class="rank-badge pending"><div><b>データ<br>不足</b></div></div>`;
@@ -101,7 +140,7 @@
     }
     const hist = results.filter((r, i) => i !== ti && r.status === '判定済')
       .map((r) => `<span class="chip"><span>${esc(shortName(r.race.name))}</span><b class="chip rank c-${r.rank}" style="border:0;padding:0;background:none">${r.rank}${r.score}</b>${r.race.result ? `→ ${esc(r.race.result)}` : ''}</span>`).join('');
-    const comment = j.status === 'データ不足' ? '' : commentHTML(Comment.make(results, ti));
+    const comment = j.status === 'データ不足' ? '' : commentHTML(Comment.make(results, ti, h.workouts));
     el.innerHTML = `<h2>判定サマリー</h2>
       <div class="summary">${badge}<div><div class="race-name">${esc(j.race.name)}</div>
       <div class="meta num">${slash(j.race.date)}（${when}）${j.race.result ? '・' + esc(j.race.result) : ''}</div></div></div>
@@ -122,10 +161,30 @@
   // ------------------------------------------------------- 出走馬の比較 ----
   const raceKey = (r) => `${r.date}|${normName(shortName(r.name)).toUpperCase()}`;
 
+  /** 他の馬の最終追い切り（自分の過去が無いときの基準に使う）。最終の割当は基準に依存しないので、プール無しで判定して集める */
+  function poolExcept(id) {
+    const pool = [];
+    for (const [hid, h] of Object.entries(state.horses)) {
+      if (hid !== id) pool.push(...Judge.finalsOf(Judge.judge(h.workouts, h.races)));
+    }
+    return pool;
+  }
+
+  function baseLabel(b) {
+    if (b.source === '自己') return `自己（過去最終${b.n}本）`;
+    if (b.source === '全馬') return `他の登録馬（最終${b.n}本の平均）`;
+    return '汎用（固定値）';
+  }
+
+  function judgeHorse(id) {
+    const h = state.horses[id];
+    return h ? Judge.judge(h.workouts, h.races, poolExcept(id)) : [];
+  }
+
   /** 全馬の判定（馬ID → results） */
   function judgeAll() {
     const out = {};
-    for (const [id, h] of Object.entries(state.horses)) out[id] = Judge.judge(h.workouts, h.races);
+    for (const id of Object.keys(state.horses)) out[id] = judgeHorse(id);
     return out;
   }
 
@@ -138,7 +197,7 @@
     const entries = [];
     for (const [id, rs] of Object.entries(all)) {
       const i = rs.findIndex((j) => raceKey(j.race) === key);
-      if (i >= 0) entries.push({ id, name: state.horses[id].name, j: rs[i], cm: Comment.make(rs, i) });
+      if (i >= 0) entries.push({ id, name: state.horses[id].name, j: rs[i], cm: Comment.make(rs, i, state.horses[id].workouts) });
     }
     if (entries.length < 2) { el.hidden = true; return; }
     const order = (e) => (e.j.status === '判定済' ? 0 : e.j.status === '最終追い切り待ち' ? 1 : 2);
@@ -189,6 +248,26 @@
     return da && db ? num / Math.sqrt(da * db) : null;
   }
 
+  /** 加減点の要素ごとに、加点・0・減点のときの着順を比べる */
+  const FACTORS = [['f1', 'ラスト1F'], ['main', '全体時計'], ['shape', 'ラスト2F形状'], ['week1', '1週前'], ['volume', '乗り込み量']];
+  function factorHTML(rows) {
+    const cell = (g) => {
+      if (!g.length) return '<td class="dim">-</td>';
+      const top3 = g.filter((r) => r.fin <= 3).length;
+      const avg = g.reduce((t, r) => t + r.fin, 0) / g.length;
+      return `<td><b>${Math.round((top3 / g.length) * 100)}%</b><small>${avg.toFixed(1)}着・${g.length}件</small></td>`;
+    };
+    const body = FACTORS.map(([key, label]) => {
+      const pts = (r) => { const it = (r.items || []).find((x) => x.key === key); return it ? it.points : null; };
+      const has = rows.filter((r) => pts(r) != null);
+      if (!has.length) return '';
+      return `<tr><th>${label}</th>${cell(has.filter((r) => pts(r) > 0))}${cell(has.filter((r) => pts(r) === 0))}${cell(has.filter((r) => pts(r) < 0))}</tr>`;
+    }).join('');
+    return `<h4>要素別（3着内率・平均着順）</h4>
+      <table class="stats factor num"><thead><tr><th>要素</th><th>加点のとき</th><th>±0</th><th>減点のとき</th></tr></thead><tbody>${body}</tbody></table>
+      <p class="meta">「加点のとき」の3着内率が「減点のとき」より高い要素ほど、着順の予想に効いています。差が無い・逆の要素は配点を見直す候補です。</p>`;
+  }
+
   function openStats() {
     const all = judgeAll();
     const rows = [];
@@ -198,7 +277,7 @@
         if (!j.race.result) continue;
         const fin = finishOf(j.race.result);
         if (j.status !== '判定済' || fin == null) { skipped++; continue; }
-        rows.push({ horse: state.horses[id].name, race: j.race, rank: j.rank, score: j.score, fin });
+        rows.push({ horse: state.horses[id].name, race: j.race, rank: j.rank, score: j.score, fin, items: j.items });
       }
     }
     const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '-');
@@ -223,6 +302,7 @@
         <table class="stats num"><thead><tr><th>ランク</th><th>件数</th><th>平均着順</th><th>勝率</th><th>連対率</th><th>3着内率</th></tr></thead>
         <tbody>${agg.map((g) => `<tr><td><span class="cmp-rank rank-${g.rk}">${g.rk}</span></td><td>${g.n}</td><td>${g.avg}</td><td>${g.win}</td><td>${g.top2}</td><td>${g.top3}</td></tr>`).join('')}</tbody></table>
         ${rhoText}
+        ${factorHTML(rows)}
         ${skipped ? `<p class="meta">着順はあるが判定できなかったレース（データ不足など）${skipped}件は除外しています</p>` : ''}
         <h4>レース一覧（点数順）</h4>
         <div class="list">${rows.sort((a, b) => b.score - a.score).map((r) => `<div class="list-row"><div><b>${esc(r.horse)}</b> <span class="sub">${esc(shortName(r.race.name))}</span><div class="sub num">${slash(r.race.date)}</div></div>
@@ -265,10 +345,10 @@
       let body = '';
       if (slots) body += `<div class="slots">${slots}</div>`;
       if (j.baseline && j.baseline.source) {
-        body += `<div class="base num">基準: ${esc(j.baseline.source)}（過去最終${j.baseline.n}本）全体 ${Judge.pyStr(j.baseline.main)} / ラスト1F ${Judge.pyStr(j.baseline.f1)}・直近14日 ${j.volume14d}本</div>`;
+        body += `<div class="base num">基準: ${baseLabel(j.baseline)}全体 ${Judge.pyStr(j.baseline.main)} / ラスト1F ${Judge.pyStr(j.baseline.f1)}・直近14日 ${j.volume14d}本</div>`;
       }
       if (j.status === '判定済') {
-        body += commentHTML(Comment.make(results, i));
+        body += commentHTML(Comment.make(results, i, horse().workouts));
         body += `<ul class="items">${j.items.map((it) => {
           const p = it.points;
           const cls = p == null ? 'zero' : p > 0 ? 'plus' : p < 0 ? 'minus' : 'zero';
@@ -391,7 +471,7 @@
     $('#chartTip').textContent = `${slash(p.date)} ${p.course} ${p.mainKey.slice(1)}F ${f1d(p.main)}・ラスト1F ${f1d(p.f1)}（${p.shape}）${best.fin ? '・最終追い切り' : ''}`;
   });
   let resizeTimer;
-  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { const h = horse(); if (h) renderChart(h, Judge.judge(h.workouts, h.races)); }, 150); });
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { const h = horse(); if (h) renderChart(h, judgeHorse(state.current)); }, 150); });
 
   // ------------------------------------------------------ スクショ取り込み ----
   $('#fileInput').addEventListener('change', async (ev) => {
@@ -788,7 +868,8 @@
       }
       case 'exportWorkouts': if (h) download(`${h.name}_training.csv`, Judge.workoutsToCSV(h.workouts), 'text/csv'); break;
       case 'exportRaces': if (h) download(`${h.name}_races.csv`, Judge.racesToCSV(h.races), 'text/csv'); break;
-      case 'exportAll': download(`chokyo-judge-backup-${todayISO()}.json`, JSON.stringify(state, null, 1), 'application/json'); break;
+      case 'exportAll': backup(); break;
+      case 'exportPool': if (h) download('pool.csv', Judge.poolToCSV(poolExcept(state.current)), 'text/csv'); break;
       case 'importAll': $('#csvInput').click(); break;
       case 'sample': await loadSamples(); break;
       case 'stats': openStats(); break;
@@ -880,4 +961,9 @@
   applyTheme();
   if (!state.current || !state.horses[state.current]) state.current = Object.keys(state.horses)[0] || null;
   render();
+  renderBackupBanner();
+  // オフライン対応（ホーム画面から電波なしでも起動・読み取りできるように）
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('service worker', e));
+  }
 })();
