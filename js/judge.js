@@ -26,11 +26,13 @@
     '南W': 'ウッド', '北W': 'ウッド', '栗CW': 'ウッド', '美W': 'ウッド',
   };
   // 基準の優先順: 自己（過去レースの最終）→ 自己調教（普段の追い切りの速い方の半分）→ 全馬 → 汎用。training_judge.py と同じ
+  const FINAL_DAYS = [2, 6];   // 最終追い切り = レース2〜6日前（7日前の日曜追いや前日の調整は最終にしない）
+  const MAIN_MARGIN = 0.5;     // 同じ週に複数あるとき、一番強い追い切りから1Fあたりこの秒数以内を「メイン」とみなす
   const SELF_WORK_MIN = 3, SELF_WORK_DAYS = [22, 365];
   const POOL_MIN = 3;   // 他の馬の最終追い切りがこの本数以上あれば汎用基準の代わりに使う
   const RANKS = [[70, 'S'], [60, 'A'], [45, 'B'], [-999, 'C']];
   const KEYS = ['f6', 'f5', 'f4', 'f3', 'f2', 'f1'];
-  const SHAPE_POINTS = { '加速': 8, '維持': 0, '減速': -6, '大きく減速': -12 };
+  const SHAPE_POINTS = { '加速': 5, '維持': 0, '減速': -5, '大きく減速': -10 };
 
   // ------------------------------------------------- Python 互換の数値処理 ----
   /** Python の round(x, n)。2進表現の正確な値で丸め、ちょうど中間なら偶数側 */
@@ -138,12 +140,47 @@
     return works.filter((w) => w.date < raceDay && (prevDay == null || w.date > prevDay));
   }
 
+  /** 追い切りの強さ = 1Fあたりで追い切りの基準時計よりどれだけ速いか（秒） */
+  function intensity(w) {
+    const [key, th] = OIKIRI_RULES[w.course] || ['f4', 58.0];
+    return (th - w.main) / Number(key[1]);
+  }
+
+  /** 同じ週に複数あれば、一番強いものから1Fあたり MAIN_MARGIN 秒以内のうち遅い日（軽い調整は除く） */
+  function pickMain(cands) {
+    if (!cands.length) return null;
+    const best = Math.max(...cands.map(intensity));
+    const main = cands.filter((w) => intensity(w) >= best - MAIN_MARGIN);
+    return main[main.length - 1];
+  }
+
+  const addDays = (iso, n) => new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + n)).toISOString().slice(0, 10);
+
+  /**
+   * 最終 = レース2〜6日前（無ければ前日）。日曜追いなど7日前のものは最終にしない。
+   * 1週前・2週前 = 最終追い切りの日（無ければレース4日前）から7日前・14日前に最も近い追い切り（±3日）
+   */
   function assignSlots(works, raceDay) {
+    const oik = works.filter((x) => x.isOikiri).sort(byDate);
+    const days = (w) => daysBetween(raceDay, w.date);
     const slots = {};
-    for (const w of works.filter((x) => x.isOikiri).sort(byDate)) {
-      const days = daysBetween(raceDay, w.date);
-      const slot = days <= 7 ? '最終' : days <= 14 ? '1週前' : days <= 21 ? '2週前' : null;
-      if (slot) slots[slot] = w;   // 同じ枠に複数あれば遅い方
+    const fin = pickMain(oik.filter((w) => days(w) >= FINAL_DAYS[0] && days(w) <= FINAL_DAYS[1]))
+      || pickMain(oik.filter((w) => days(w) === 1));
+    if (fin) slots['最終'] = fin;
+    const anchor = fin ? fin.date : addDays(raceDay, -4);
+    for (const [name, back] of [['1週前', 7], ['2週前', 14]]) {
+      let best = null, bestKey = null;
+      for (const w of oik) {
+        if (w === fin) continue;
+        const off = Math.abs(daysBetween(anchor, w.date) - back);
+        if (off > 3) continue;
+        // 7日前（14日前）に一番近い日。同じ近さなら強い方、さらに同じなら遅い方
+        const key = [off, -intensity(w), -dayNum(w.date)];
+        if (!bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && (key[1] < bestKey[1] || (key[1] === bestKey[1] && key[2] < bestKey[2])))) {
+          best = w; bestKey = key;
+        }
+      }
+      if (best) slots[name] = best;
     }
     return slots;
   }
@@ -224,14 +261,14 @@
       const fin = slots['最終'];
       const items = [];
       let score = 50, p;
-      // 1) 終い1Fを自己基準と比較（0.1秒 = 5点、±15で頭打ち）
+      // 1) 終い1Fを自己基準と比較（0.1秒 = 3点、±12で頭打ち。0.1〜0.2秒は馬場や計測のぶれでも出るので控えめに）
       const d1 = pyRound(base.f1 - fin.f1, 2);
-      p = Math.max(-15, Math.min(15, scoreRound(d1 * 50)));
+      p = Math.max(-12, Math.min(12, scoreRound(d1 * 30)));
       score += p;
       items.push({ key: 'f1', points: p, text: `ラスト1F ${pyStr(fin.f1)}（基準${pyStr(base.f1)}より${pyFmt(Math.abs(d1), 2)}秒${d1 > 0 ? '速い' : d1 < 0 ? '遅い' : '同じ'}）${signed(p)}` });
-      // 2) 全体時計（1秒 = 5点、±10）
+      // 2) 全体時計（1秒 = 4点、±12）
       const dm = pyRound(base.main - fin.main, 1);
-      p = Math.max(-10, Math.min(10, scoreRound(dm * 5)));
+      p = Math.max(-12, Math.min(12, scoreRound(dm * 4)));
       score += p;
       items.push({ key: 'main', points: p, text: `全体 ${pyStr(fin.main)}（基準${pyStr(base.main)}）${signed(p)}` });
       // 3) ラップ形状

@@ -26,7 +26,7 @@ import math
 import re
 import statistics
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 # ---------------------------------------------------------------- 設定 ----
@@ -41,6 +41,10 @@ OIKIRI_RULES = {
 #                 SELF_WORK_MIN 本以上あれば、ラスト1Fが速い方の半分（最低 SELF_WORK_MIN 本）の平均
 #   3. 全馬   … 他の登録馬の最終追い切り（同トレセン・同コース）が POOL_MIN 本以上あればその平均
 #   4. 汎用   … 固定値
+# 最終追い切り = レース2〜6日前の追い切り（7日前の日曜追いや前日の調整は最終にしない）
+FINAL_DAYS = (2, 6)
+# 同じ週に複数あるとき、一番強い追い切りから1Fあたりこの秒数以内のものを「メイン」とみなす
+MAIN_MARGIN = 0.5
 SELF_WORK_MIN = 3
 SELF_WORK_DAYS = (22, 365)
 POOL_MIN = 3
@@ -218,13 +222,37 @@ def window(works: list[Workout], race_day: date, prev_day: Optional[date]) -> li
     return [w for w in works if w.day < race_day and (prev_day is None or w.day > prev_day)]
 
 
+def intensity(w: Workout) -> float:
+    """追い切りの強さ = 1Fあたりで追い切りの基準時計よりどれだけ速いか（秒）。坂路とウッドを同じ物差しで比べる"""
+    key, th = OIKIRI_RULES.get(w.course, ("f4", 58.0))
+    n = int(key[1])
+    return (th - w.main) / n
+
+
+def pick_main(cands: list[Workout]) -> Optional[Workout]:
+    """同じ週に追い切りが複数あれば、一番強いものから1Fあたり MAIN_MARGIN 秒以内のうち遅い日（軽い調整は除く）"""
+    if not cands:
+        return None
+    best = max(intensity(w) for w in cands)
+    return [w for w in cands if intensity(w) >= best - MAIN_MARGIN][-1]
+
+
 def assign_slots(works: list[Workout], race_day: date) -> dict:
+    """最終 = レース2〜6日前（無ければ前日）。日曜追いなど7日前のものは最終にしない。
+    1週前・2週前 = 最終追い切りの日（無ければレース4日前）から7日前・14日前に最も近い追い切り（±3日）"""
+    oik = sorted((w for w in works if w.is_oikiri), key=lambda w: w.day)
+    days = lambda w: (race_day - w.day).days
     slots = {}
-    for w in sorted((w for w in works if w.is_oikiri), key=lambda w: w.day):
-        days = (race_day - w.day).days
-        slot = "最終" if days <= 7 else "1週前" if days <= 14 else "2週前" if days <= 21 else None
-        if slot:
-            slots[slot] = w  # 同じ枠に複数あれば遅い方
+    fin = pick_main([w for w in oik if FINAL_DAYS[0] <= days(w) <= FINAL_DAYS[1]]) \
+        or pick_main([w for w in oik if days(w) == 1])
+    if fin:
+        slots["最終"] = fin
+    anchor = fin.day if fin else race_day - timedelta(days=4)
+    for name, back in (("1週前", 7), ("2週前", 14)):
+        cands = [w for w in oik if w is not fin and abs((anchor - w.day).days - back) <= 3]
+        if cands:
+            # 7日前（14日前）に一番近い日。同じ近さなら強い方、さらに同じなら遅い方
+            slots[name] = min(cands, key=lambda w: (abs((anchor - w.day).days - back), -intensity(w), -w.day.toordinal()))
     return slots
 
 
@@ -299,19 +327,19 @@ def judge(works: list[Workout], races: list[Race], pool: Optional[list[PoolEntry
 
         fin = slots["最終"]
         score = 50
-        # 1) 終い1Fを自己基準と比較（0.1秒 = 5点、±15で頭打ち）
+        # 1) 終い1Fを自己基準と比較（0.1秒 = 3点、±12で頭打ち。0.1〜0.2秒は馬場や計測のぶれでも出るので控えめに）
         d1 = round(base["f1"] - fin.f1, 2)
-        p = max(-15, min(15, score_round(d1 * 50)))
+        p = max(-12, min(12, score_round(d1 * 30)))
         score += p
         j.notes.append(f"ラスト1F {fin.f1}（基準{base['f1']}より{abs(d1):.2f}秒"
                        f"{'速い' if d1 > 0 else '遅い' if d1 < 0 else '同じ'}）{p:+d}")
-        # 2) 全体時計（1秒 = 5点、±10）
+        # 2) 全体時計（1秒 = 4点、±12）
         dm = round(base["main"] - fin.main, 1)
-        p = max(-10, min(10, score_round(dm * 5)))
+        p = max(-12, min(12, score_round(dm * 4)))
         score += p
         j.notes.append(f"全体 {fin.main}（基準{base['main']}）{p:+d}")
         # 3) ラップ形状
-        p = {"加速": 8, "維持": 0, "減速": -6, "大きく減速": -12}.get(fin.shape, 0)
+        p = {"加速": 5, "維持": 0, "減速": -5, "大きく減速": -10}.get(fin.shape, 0)
         score += p
         j.notes.append(f"ラスト2F形状 {fin.shape} {p:+d}")
         # 4) 1週前
