@@ -14,9 +14,15 @@
 </head>
 <body>
 <h1>OCR精度テスト</h1>
-<p>tests/screenshots/*.webp|png|jpg を読み取り、data/*.csv の正解と照合します（ローカル専用）。</p>
-<p><label>画像リスト（カンマ区切り）: <input id="list" size="60" value="1.webp:winmarvel,2.webp:winmarvel,3.webp:winmarvel,4.webp:aisansan,5.webp:aisansan,6.webp:aisansan"></label>
-<button id="run">実行</button></p>
+<p>tests/private/screenshots/ の画像を読み取り、tests/private/truth/ の正解CSVと照合します（ローカル専用。tests/private/ は .gitignore 対象で公開しない）。</p>
+<p>必要なファイル:</p>
+<ul>
+  <li><code>tests/private/ocr_cases.txt</code> … 「画像ファイル名:正解名」をカンマ区切りで並べた1行（例: <code>1.webp:horse1,2.webp:horse1,3.webp:horse2</code>）</li>
+  <li><code>tests/private/screenshots/&lt;画像ファイル名&gt;</code> … 調教タイム画面のスクショ</li>
+  <li><code>tests/private/truth/&lt;正解名&gt;_training.csv</code> … 正解（調教CSVと同じ形式 date,time,center,course,f6..f1）</li>
+</ul>
+<p><label>画像リスト（カンマ区切り）: <input id="list" size="60" value=""></label>
+<button id="run" disabled>実行</button></p>
 <pre id="log"></pre>
 <div id="out"></div>
 <script src="../js/ocr.js"></script>
@@ -24,8 +30,17 @@
 const KEYS = ['f6','f5','f4','f3','f2','f1'];
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
 
+// ローカル専用のテストデータ（実際のスクショと正解はリポジトリに含めない）
+const PRIVATE = 'private/';
+
+async function fetchOk(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url} が見つかりません（HTTP ${r.status}）`);
+  return r;
+}
+
 async function loadTruth(name) {
-  const txt = await (await fetch(`../data/${name}_training.csv`)).text();
+  const txt = await (await fetchOk(`${PRIVATE}truth/${name}_training.csv`)).text();
   const [head, ...lines] = txt.trim().split(/\r?\n/);
   const cols = head.split(',');
   return lines.map((l) => { const v = l.split(','); const o = {}; cols.forEach((c, i) => o[c] = v[i]); return o; });
@@ -40,7 +55,7 @@ async function run() {
   for (const [file, horse] of items) {
     const truth = await loadTruth(horse);
     const byDate = new Map(truth.map((t) => [t.date + ' ' + t.time, t]));
-    const blob = await (await fetch(`screenshots/${file}`)).blob();
+    const blob = await (await fetchOk(`${PRIVATE}screenshots/${file}`)).blob();
     const t0 = performance.now();
     const res = await ChokyoOCR.recognizeFile(blob, () => {});
     const ms = Math.round(performance.now() - t0);
@@ -94,6 +109,24 @@ async function run() {
   window.__result = result;
 }
 document.getElementById('run').onclick = () => run().catch((e) => { log('ERROR ' + e.stack); window.__result = { error: String(e) }; });
+
+// ローカル専用データが無い環境（公開版・クローン直後など）では、理由を出してスキップする
+(async () => {
+  let cases = '';
+  try {
+    const r = await fetch(`${PRIVATE}ocr_cases.txt`);
+    if (r.ok) cases = (await r.text()).trim();
+  } catch (e) { /* file:// で開いた・サーバー無しなど */ }
+  if (!cases) {
+    const reason = `tests/${PRIVATE}ocr_cases.txt が無いため OCR テストをスキップしました（ローカル専用データ未配置）。`;
+    log('SKIP: ' + reason);
+    log('実行するには上の「必要なファイル」を tests/private/ に置き、python -m http.server で配信して開き直してください。');
+    window.__result = { skipped: true, reason };
+    return;
+  }
+  document.getElementById('list').value = cases;
+  document.getElementById('run').disabled = false;
+})();
 </script>
 </body>
 </html>

@@ -46,8 +46,8 @@ function check(label, w, r, show, pool) {
   return d.length === 0;
 }
 
-// 1) サンプル2頭
-for (const horse of ['aisansan', 'winmarvel']) {
+// 1) サンプル2頭（data/sample_*.csv。架空データ）
+for (const horse of ['sample_a', 'sample_b']) {
   const ok = check(horse, join(root, 'data', `${horse}_training.csv`), join(root, 'data', `${horse}_races.csv`), true);
   console.log(`${ok ? '✓' : '✗'} ${horse}: Python と一致`);
 }

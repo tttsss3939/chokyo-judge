@@ -448,10 +448,10 @@ def report(horse: str, results: list[Judgement]) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description="調教タイム判定")
-    ap.add_argument("--horse", default="アイサンサン")
-    ap.add_argument("--workouts", default="data/aisansan_training.csv")
+    ap.add_argument("--horse", default="サンプルA")
+    ap.add_argument("--workouts", default="data/sample_a_training.csv")
     ap.add_argument("--text", help="JRA-VANからコピペした調教テキスト（CSVの代わり）")
-    ap.add_argument("--races", default="data/aisansan_races.csv")
+    ap.add_argument("--races", default="data/sample_a_races.csv")
     ap.add_argument("--pool", help="他の馬の最終追い切りCSV（date,center,course,main,f1）。自分の過去が無いときの基準に使う")
     ap.add_argument("--json", action="store_true", help="判定結果を JSON で出力（JS版との一致テスト用）")
     a = ap.parse_args()

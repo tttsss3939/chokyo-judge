@@ -1,4 +1,32 @@
 # JRA-VAN 画面のスクショ（OCR テスト用。公開しない）
 tests/screenshots/
+# OCR テストのローカル専用データ（スクショ・正解CSV。公開しない）
+tests/private/
+# CSV は原則として追跡しない（実データの混入防止）。公開するのは架空サンプルの次の4ファイルだけ
+*.csv
+!data/sample_a_races.csv
+!data/sample_a_training.csv
+!data/sample_b_races.csv
+!data/sample_b_training.csv
+# 画像も原則として追跡しない（スクショの混入防止）。アプリが使う画像は icons/ のアイコンだけ
+# （index.html・manifest.webmanifest・sw.js が参照、tests/make_icons.py で生成）
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.heic
+*.heif
+*.bmp
+!icons/*.png
+# DB・JV-Link のデータファイル・ログ・アプリのバックアップ（公開しない）
+*.sqlite
+*.sqlite3
+*.db
+*.jvd
+*.rtd
+*.log
+logs/
+chokyo-judge-backup-*.json
 __pycache__/
 .DS_Store

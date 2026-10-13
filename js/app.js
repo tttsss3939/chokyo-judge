@@ -960,7 +960,8 @@
   });
 
   async function loadSamples() {
-    const samples = [['アイサンサン', '栗東', 'aisansan'], ['ウインマーベル', '美浦', 'winmarvel']];
+    // 架空の馬・架空の時計（実在の馬・実データではない）
+    const samples = [['サンプルA', '栗東', 'sample_a'], ['サンプルB', '美浦', 'sample_b']];
     try {
       for (const [name, center, key] of samples) {
         const [wt, rt] = await Promise.all([`data/${key}_training.csv`, `data/${key}_races.csv`].map((u) => fetch(u).then((r) => { if (!r.ok) throw new Error(u); return r.text(); })));

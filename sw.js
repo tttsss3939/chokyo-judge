@@ -5,7 +5,7 @@
  * vendor の中身を差し替えたら VENDOR_CACHE の版を上げる。
  */
 // 版番号。更新したら index.html の app-version と合わせて上げる（sw.js が変わると端末側で更新が走る）
-const APP_CACHE = 'chokyo-app-2026.10.12-1';
+const APP_CACHE = 'chokyo-app-2026.10.13-1';
 const VENDOR_CACHE = 'chokyo-vendor-tesseract-5.1.1';
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest',

@@ -51,7 +51,6 @@ OCR エンジンとモデル（約13MB、`vendor/tesseract/`）はアプリに�
 
 配点は 2026/10/12 に見直した（旧: ラスト1F 0.1秒=5点±15、全体 1秒=5点±10、形状 +8/0/-6/-12）。
 ラスト1Fの0.1〜0.2秒差は馬場や計測のぶれでも出るうえ、ラスト2Fの形と合わせて終いを二重に数えていたため。
-サンプルの判定結果も変わった。
 配点は「成績の検証」の要素別の表を見ながら、結果がたまったら調整する前提。
 
 点数の丸めは四捨五入（`score_round`: .5 は切り上げ、浮動小数の誤差は吸収）。
@@ -61,8 +60,8 @@ JS 版や意図した点数と 1 点ずれることがあったのを修正し�
 ### Python 版
 
 ```bash
-python training_judge.py                                    # アイサンサン（data/ のサンプル）
-python training_judge.py --horse ウインマーベル --workouts data/winmarvel_training.csv --races data/winmarvel_races.csv
+python training_judge.py                                    # サンプルA（data/ の架空サンプル）
+python training_judge.py --horse サンプルB --workouts data/sample_b_training.csv --races data/sample_b_races.csv
 python training_judge.py --workouts 馬_training.csv --races 馬_races.csv --pool pool.csv   # 他の馬の最終追い切りを基準に使う
 python training_judge.py --json ...                         # JSON 出力（JS版との突き合わせ用）
 ```
@@ -79,7 +78,7 @@ python training_judge.py --json ...                         # JSON 出力（JS�
 6. コースは 5F/6F に値があればウッド、なければ坂路
 7. よくある誤読を補正: `11.7`→`1.7`（先頭の1が脱落）、小数点の脱落、`10/25`→`10/125`、坂路の「-」セルのノイズ
 
-### 精度（tests/screenshots の6枚 = PC上のスマホプレビューのキャプチャ、幅512px相当の低解像度）
+### 精度（ローカル専用のスクショ6枚 = PC上のスマホプレビューのキャプチャ、幅512px相当の低解像度）
 
 | 指標 | 結果 |
 |---|---|
@@ -110,12 +109,22 @@ python tools/update_graded.py 2027
 ## テスト
 
 ```bash
-node tests/parity.mjs        # JS版と Python版の判定一致（サンプル2頭 + ランダム300ケース）
-python -m http.server 8765   # → http://localhost:8765/tests/ocr_test.html で OCR 精度テスト
+node tests/parity.mjs        # JS版と Python版の判定一致（架空サンプル2頭 + ランダム300ケース）
+python -m http.server 8765   # → http://localhost:8765/tests/ocr_test.html で OCR 精度テスト（ローカル専用）
 ```
 
-`tests/ocr_test.html` は `tests/screenshots/` の画像を読み、`data/*.csv` の正解と照合する。
-スクショは JRA-VAN の画面なのでリポジトリには含めない（`.gitignore`）。
+`data/sample_*.csv` は架空の馬・架空の時計（実在の馬・実データではない）。アプリの「サンプル2頭を読み込む」と一致テストで使う。
+
+`tests/ocr_test.html` は `tests/private/` のローカル専用データで動く。スクショ（JRA-VAN の画面）と正解CSVは
+実データなのでリポジトリには含めない（`tests/private/` は `.gitignore` 対象）。
+
+```
+tests/private/ocr_cases.txt              「画像ファイル名:正解名」のカンマ区切り（例: 1.webp:horse1,2.webp:horse1）
+tests/private/screenshots/<画像>         調教タイム画面のスクショ
+tests/private/truth/<正解名>_training.csv 正解（調教CSVと同じ形式）
+```
+
+`ocr_cases.txt` が無いときは、画面に理由を出してスキップする（アプリ本体の動作には関係しない）。
 
 ## ファイル構成
 
@@ -131,6 +140,6 @@ training_judge.py      Python 版
 tools/update_graded.py 重賞日程の取得（年1回）
 sw.js                  オフライン対応（Service Worker）
 vendor/tesseract/      Tesseract.js 5.1.1 一式と英数字・日本語モデル（Apache-2.0、LICENSE 同梱）
-data/                  サンプル（アイサンサン・ウインマーベル）と重賞日程 graded_<年>.json
-tests/                 一致テスト・OCR テスト
+data/                  架空サンプル（sample_a / sample_b）と重賞日程 graded_<年>.json
+tests/                 一致テスト・OCR テスト（OCR テストのデータは tests/private/、公開しない）
 ```
